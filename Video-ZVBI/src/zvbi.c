@@ -10,20 +10,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * $Id: ZVBI.xs,v 1.8 2020/04/01 07:17:11 tom Exp tom $
  */
 
-#include "EXTERN.h"
-#include "perl.h"
-#include "XSUB.h"
-
-/* backwards compatibility with older versions of Perl via Devel::PPPort */
-#define NEED_newCONSTSUB
-#define NEED_newRV_noinc
-#define NEED_sv_2pv_flags
-#define NEED_sv_pvn_force_flags
-#include "ppport_zvbi.h"
+#define PY_SSIZE_T_CLEAN
+#include "Python.h"
 
 #include <unistd.h>
 #include <string.h>

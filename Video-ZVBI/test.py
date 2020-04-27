@@ -1,6 +1,6 @@
-#!/usr/bin/perl -w
+#!/usr/bin/python3
 #
-# Copyright (C) 2007 Tom Zoerner.
+# Copyright (C) 2007,2020 T. Zoerner
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,18 +13,11 @@
 # GNU General Public License for more details.
 #
 # For a copy of the GPL refer to <http://www.gnu.org/licenses/>
-#
-# $Id: test.pl,v 1.2 2007/12/02 18:43:53 tom Exp tom $
-#
 
-use blib;
-use Video::ZVBI;
+import Zvbi
 
 # Well, so far we only test if the module loads correctly.
 # For manual testing, see the examples/ sub-directory.
 
-print "OK module booted, library version ".
-      join('.', Video::ZVBI::lib_version()) ."\n";
-
-1;
-
+print("OK module booted, library version " +
+      join(ZVBI.lib_version(), '.') +"\n")
