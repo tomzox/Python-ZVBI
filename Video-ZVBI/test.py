@@ -19,5 +19,7 @@ import Zvbi
 # Well, so far we only test if the module loads correctly.
 # For manual testing, see the examples/ sub-directory.
 
-print("OK module booted, library version " +
-      join(ZVBI.lib_version(), '.') +"\n")
+print("OK module booted, library version %d.%d.%d\n" % (Zvbi.lib_version()))
+
+if not Zvbi.check_lib_version(0, 2, 35):
+    print("Library version is outdated")
