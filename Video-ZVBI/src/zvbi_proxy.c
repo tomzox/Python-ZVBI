@@ -65,10 +65,7 @@ zvbi_xs_proxy_callback( void * user_data, VBI_PROXY_EV_TYPE ev_mask )
 static PyObject *
 ZvbiProxy_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-    ZvbiProxyObj *self;
-    self = (ZvbiProxyObj *) type->tp_alloc(type, 0);
-
-    return (PyObject *) self;
+    return type->tp_alloc(type, 0);
 }
 
 static void

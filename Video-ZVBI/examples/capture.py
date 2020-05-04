@@ -359,5 +359,9 @@ def main_func():
 
     mainloop(cap)
 
-opt = ParseCmdOptions()
-main_func()
+# main
+try:
+    opt = ParseCmdOptions()
+    main_func()
+except KeyboardInterrupt:
+    pass

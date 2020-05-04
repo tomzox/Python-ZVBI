@@ -32,11 +32,6 @@ typedef struct {
     unsigned services;
 } ZvbiCaptureObj;
 
-typedef struct {
-    PyObject_HEAD
-    vbi_capture_buffer buf;
-} ZvbiSlicedBufferObj;
-
 #if defined (NAMED_TUPLE_GC_BUG)
 static PyTypeObject ZvbiCapture_ResultTypeBuf;
 static PyTypeObject * const ZvbiCapture_ResultType = &ZvbiCapture_ResultTypeBuf;
@@ -51,10 +46,7 @@ PyObject * ZvbiCaptureError;
 static PyObject *
 ZvbiCapture_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-    ZvbiCaptureObj *self;
-    self = (ZvbiCaptureObj *) type->tp_alloc(type, 0);
-
-    return (PyObject *) self;
+    return type->tp_alloc(type, 0);
 }
 
 static void
@@ -225,7 +217,7 @@ ZvbiCapture_read_sliced(ZvbiCaptureObj *self, PyObject *args)
     vbi_raw_decoder * p_par = vbi_capture_parameters(self->ctx);
     if (p_par != NULL) {
 	size_t size_sliced = (p_par->count[0] + p_par->count[1]) * sizeof(vbi_sliced);
-        vbi_sliced * p_sliced = (vbi_sliced*) malloc(size_sliced);
+        vbi_sliced * p_sliced = (vbi_sliced*) PyMem_Malloc(size_sliced);
 
         int n_lines = 0;
         double timestamp = 0;
@@ -243,7 +235,7 @@ ZvbiCapture_read_sliced(ZvbiCaptureObj *self, PyObject *args)
                 PyStructSequence_SetItem(RETVAL, 3, ZvbiCaptureSlicedBuf_FromData(p_sliced, n_lines, timestamp));
             }
             else {
-                free(p_sliced);
+                PyMem_Free(p_sliced);
             }
         }
         else {
@@ -254,7 +246,7 @@ ZvbiCapture_read_sliced(ZvbiCaptureObj *self, PyObject *args)
                 // FIXME use different exception
                 PyErr_SetString(ZvbiCaptureError, "timeout");
             }
-            free(p_sliced);
+            PyMem_Free(p_sliced);
         }
     }
     else {
@@ -280,7 +272,7 @@ ZvbiCapture_read(ZvbiCaptureObj *self, PyObject *args)
         PyObject * raw_obj = PyBytes_FromStringAndSize(NULL, size_raw);
         void * raw_buffer = PyBytes_AS_STRING(raw_obj);
 
-        vbi_sliced * p_sliced = (vbi_sliced*) malloc(size_sliced);
+        vbi_sliced * p_sliced = (vbi_sliced*) PyMem_Malloc(size_sliced);
 
         int n_lines = 0;
         double timestamp = 0;
@@ -298,7 +290,7 @@ ZvbiCapture_read(ZvbiCaptureObj *self, PyObject *args)
                 PyStructSequence_SetItem(RETVAL, 3, ZvbiCaptureSlicedBuf_FromData(p_sliced, n_lines, timestamp));
             }
             else {
-                free(p_sliced);
+                PyMem_Free(p_sliced);
             }
         }
         else {
@@ -309,7 +301,7 @@ ZvbiCapture_read(ZvbiCaptureObj *self, PyObject *args)
                 // FIXME use different exception
                 PyErr_SetString(ZvbiCaptureError, "timeout");
             }
-            free(p_sliced);
+            PyMem_Free(p_sliced);
         }
     }
     else {

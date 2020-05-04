@@ -40,21 +40,22 @@ PyObject *
 ZvbiRawDec_Par2Dict( const vbi_raw_decoder * p_par )
 {
     PyObject * dict = PyDict_New();
-
-    if ((PyDict_SetItemString(dict, "scanning", PyLong_FromLong(p_par->scanning)) != 0) ||
-        (PyDict_SetItemString(dict, "sampling_format", PyLong_FromLong(p_par->sampling_format)) != 0) ||
-        (PyDict_SetItemString(dict, "sampling_rate", PyLong_FromLong(p_par->sampling_rate)) != 0) ||
-        (PyDict_SetItemString(dict, "bytes_per_line", PyLong_FromLong(p_par->bytes_per_line)) != 0) ||
-        (PyDict_SetItemString(dict, "offset", PyLong_FromLong(p_par->offset)) != 0) ||
-        (PyDict_SetItemString(dict, "start_a", PyLong_FromLong(p_par->start[0])) != 0) ||
-        (PyDict_SetItemString(dict, "start_b", PyLong_FromLong(p_par->start[1])) != 0) ||
-        (PyDict_SetItemString(dict, "count_a", PyLong_FromLong(p_par->count[0])) != 0) ||
-        (PyDict_SetItemString(dict, "count_b", PyLong_FromLong(p_par->count[1])) != 0) ||
-        (PyDict_SetItemString(dict, "interlaced", PyBool_FromLong(p_par->interlaced)) != 0) ||
-        (PyDict_SetItemString(dict, "synchronous", PyBool_FromLong(p_par->synchronous)) != 0))
-    {
-        Py_DECREF(dict);
-        dict = NULL;
+    if (dict != NULL) {
+        if ((PyDict_SetItemString(dict, "scanning", PyLong_FromLong(p_par->scanning)) != 0) ||
+            (PyDict_SetItemString(dict, "sampling_format", PyLong_FromLong(p_par->sampling_format)) != 0) ||
+            (PyDict_SetItemString(dict, "sampling_rate", PyLong_FromLong(p_par->sampling_rate)) != 0) ||
+            (PyDict_SetItemString(dict, "bytes_per_line", PyLong_FromLong(p_par->bytes_per_line)) != 0) ||
+            (PyDict_SetItemString(dict, "offset", PyLong_FromLong(p_par->offset)) != 0) ||
+            (PyDict_SetItemString(dict, "start_a", PyLong_FromLong(p_par->start[0])) != 0) ||
+            (PyDict_SetItemString(dict, "start_b", PyLong_FromLong(p_par->start[1])) != 0) ||
+            (PyDict_SetItemString(dict, "count_a", PyLong_FromLong(p_par->count[0])) != 0) ||
+            (PyDict_SetItemString(dict, "count_b", PyLong_FromLong(p_par->count[1])) != 0) ||
+            (PyDict_SetItemString(dict, "interlaced", PyBool_FromLong(p_par->interlaced)) != 0) ||
+            (PyDict_SetItemString(dict, "synchronous", PyBool_FromLong(p_par->synchronous)) != 0))
+        {
+            Py_DECREF(dict);
+            dict = NULL;
+        }
     }
     return dict;
 }
@@ -113,8 +114,7 @@ ZvbiRawDec_Dict2Par( PyObject * dict, vbi_raw_decoder * p_rd )
 static PyObject *
 ZvbiRawDec_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-    ZvbiRawDecObj *self;
-    self = (ZvbiRawDecObj *) type->tp_alloc(type, 0);
+    ZvbiRawDecObj * self = (ZvbiRawDecObj *) type->tp_alloc(type, 0);
 
     vbi_raw_decoder_init(&self->rd);
 
@@ -278,7 +278,7 @@ ZvbiRawDec_decode(ZvbiRawDecObj *self, PyObject *args)
             p_raw = p_raw_buf->data;
         }
         else {
-            PyErr_SetString(ZvbiRawDecError, "Raw capture buffer holds no data");
+            PyErr_SetString(ZvbiRawDecError, "Raw capture buffer contains no data");
         }
     }
     else if (PyObject_IsSubclass(obj, (PyObject*)&PyBytes_Type) == 1) {

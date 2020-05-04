@@ -170,8 +170,16 @@ sub main_func
 		     VBI_SLICED_VPS |
 		     VBI_SLICED_CAPTION_525);
 
-        # open VBI device (buffers:=5, strict:=0, verbose:=FALSE
-	$cap = Video::ZVBI::capture::v4l2_new ("/dev/vbi0", 5, $services, 0, $errstr, 0);
+        if (0) {
+                # open VBI device (buffers:=5, strict:=0, verbose:=FALSE
+                my $opt_device = "/dev/dvb/adapter0/demux0";
+                $cap = Video::ZVBI::capture::v4l2_new ($opt_device, 5, $services, 0, $errstr, 0);
+        }
+        else {
+                my $opt_device = "/dev/dvb/adapter0/demux0";
+                my $opt_pid = 104;
+                $cap = Video::ZVBI::capture::dvb_new2($opt_device, $opt_pid, $errstr, 0);
+        }
         die "Cannot capture VBI data with V4L2 interface: $errstr\n" unless $cap;
 
 	$dec = Video::ZVBI::vt::decoder_new ();

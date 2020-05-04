@@ -123,14 +123,25 @@ sub pes_mainloop {
 }
 
 sub old_mainloop {
-        my $opt_device = "/dev/vbi0";
-        my $opt_buf_count = 5;
-        my $opt_services = VBI_SLICED_TELETEXT_B;
-        my $opt_strict = 0;
-        my $opt_debug_level = 0;
+        my $cap;
+        if (0) {
+                my $opt_device = "/dev/vbi0";
+                my $opt_buf_count = 5;
+                my $opt_services = VBI_SLICED_TELETEXT_B;
+                my $opt_strict = 0;
+                my $opt_debug_level = 0;
 
-        my $err;
-        my $cap = Video::ZVBI::capture::v4l2_new($opt_device, $opt_buf_count, $opt_services, $opt_strict, $err, $opt_debug_level) || die "V4l open: $!\n";
+                my $err;
+                $cap = Video::ZVBI::capture::v4l2_new($opt_device, $opt_buf_count, $opt_services, $opt_strict, $err, $opt_debug_level) || die "V4l open: $!\n";
+        }
+        else {
+                my $opt_device = "/dev/dvb/adapter0/demux0";
+                my $opt_pid = 104;
+                my $opt_debug_level = 0;
+
+                my $err;
+                $cap = Video::ZVBI::capture::dvb_new2($opt_device, $opt_pid, $err, $opt_debug_level);
+        }
 
         while (!$quit) {
                 my $sliced;

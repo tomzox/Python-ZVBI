@@ -38,7 +38,7 @@ sub pg_handler {
 sub progress {
    my ($pg,$user_data) = @_;
    my ($page,$sub) = $pg->get_page_no();
-   printf "${cr}Search #$user_data->[0] %03X.%04x ", $page, $sub;
+   printf "${cr}Searching %03X.%04x for \"%s\" ", $page, $sub, $user_data;
 }
 
 sub search {
@@ -56,7 +56,7 @@ sub search {
 
       #my $rand = [int(rand(1000))];
       #print "Search rand user data $rand->[0]\n";
-      $srch = Video::ZVBI::search::new($vtdec, 0x100, $any_sub, $pat, 0, 0, \&progress);
+      $srch = Video::ZVBI::search::new($vtdec, 0x100, $any_sub, $pat, 0, 0, \&progress, $pat);
       die "failed to initialize search: $!\n" unless $srch;
 
       while (($stat = $srch->next($pg, 1)) == VBI_SEARCH_SUCCESS) {
@@ -81,36 +81,44 @@ sub search {
 }
 
 sub main_func {
-   my $opt_device = "/dev/vbi0";
-   my $opt_buf_count = 5;
-   my $opt_services = VBI_SLICED_TELETEXT_B;
-   my $opt_strict = 0;
    my $opt_verbose = 0;
    my $err;
-   my $pxc;
    my $cap;
    my $vtdec;
    my $exp;
 
-   $pxc = Video::ZVBI::proxy::create($opt_device, $0, 0, $err, $opt_verbose);
-   if (defined $pxc) {
-      # work-around for bug in proxy_new() prior to libzvbi 0.2.26 which closed STDIN
-      open OLDSTDIN, "<&", \*STDIN;
+   if (0) {
+      my $opt_device = "/dev/vbi0";
+      my $opt_buf_count = 5;
+      my $opt_services = VBI_SLICED_TELETEXT_B;
+      my $opt_strict = 0;
 
-      $cap = Video::ZVBI::capture::proxy_new($pxc, 5, 0, $opt_services, $opt_strict, $err);
-      undef $pxc unless defined $cap;
+      my $pxc = Video::ZVBI::proxy::create($opt_device, $0, 0, $err, $opt_verbose);
+      if (defined $pxc) {
+         # work-around for bug in proxy_new() prior to libzvbi 0.2.26 which closed STDIN
+         open OLDSTDIN, "<&", \*STDIN;
 
-      open STDIN, "<&OLDSTDIN"; # work-around cntd.
-      close OLDSTDIN;
+         $cap = Video::ZVBI::capture::proxy_new($pxc, 5, 0, $opt_services, $opt_strict, $err);
+         undef $pxc unless defined $cap;
+
+         open STDIN, "<&OLDSTDIN"; # work-around cntd.
+         close OLDSTDIN;
+      }
+      if (!defined $cap) {
+         $cap = Video::ZVBI::capture::v4l2_new($opt_device, $opt_buf_count, $opt_services, $opt_strict, $err, $opt_verbose);
+      }
+      if (!defined $cap) {
+         $cap = Video::ZVBI::capture::v4l_new($opt_device, 0, $opt_services, $opt_strict, $err, $opt_verbose);
+      }
+      if (!defined $cap) {
+         $cap = Video::ZVBI::capture::bktr_new($opt_device, 0, $opt_services, $opt_strict, $err, $opt_verbose);
+      }
    }
-   if (!defined $cap) {
-      $cap = Video::ZVBI::capture::v4l2_new($opt_device, $opt_buf_count, $opt_services, $opt_strict, $err, $opt_verbose);
-   }
-   if (!defined $cap) {
-      $cap = Video::ZVBI::capture::v4l_new($opt_device, 0, $opt_services, $opt_strict, $err, $opt_verbose);
-   }
-   if (!defined $cap) {
-      $cap = Video::ZVBI::capture::bktr_new($opt_device, 0, $opt_services, $opt_strict, $err, $opt_verbose);
+   else {
+      my $opt_device = "/dev/dvb/adapter0/demux0";
+      my $opt_pid = 104;
+
+      $cap = Video::ZVBI::capture::dvb_new2($opt_device, $opt_pid, $err, $opt_verbose);
    }
    die "Failed to open video device: $err\n" unless $cap;
 
@@ -137,9 +145,9 @@ sub main_func {
       }
 
       $res = $cap->pull_sliced($sliced, $n_lines, $timestamp, 1000);
-      die "Capture error: $!\n" if $res < 0;
+      warn "Capture error: $!\n" if $res < 0;
 
-      if ($res != 0) {
+      if ($res > 0) {
          $vtdec->decode($sliced, $n_lines, $timestamp);
       }
    }

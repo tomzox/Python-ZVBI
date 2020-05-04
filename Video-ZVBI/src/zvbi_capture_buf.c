@@ -33,9 +33,7 @@ typedef struct {
 static PyObject *
 ZvbiCaptureBuf_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-    ZvbiCaptureBufObj * self = (ZvbiCaptureBufObj *) type->tp_alloc(type, 0);
-
-    return (PyObject *) self;
+    return type->tp_alloc(type, 0);
 }
 
 static void
@@ -44,9 +42,9 @@ ZvbiCaptureBuf_dealloc(ZvbiCaptureBufObj *self)
     // when originating from "pull", self->buf is owned by libzvbi
     if (self->buf && self->need_free) {
         if (self->buf->data) {
-            free(self->buf->data);
+            PyMem_RawFree(self->buf->data);
         }
-        free(self->buf);
+        PyMem_RawFree(self->buf);
     }
     Py_TYPE(self)->tp_free((PyObject *) self);
 }
@@ -101,11 +99,11 @@ static PyTypeObject ZvbiCaptureBufTypeDef =
 {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "Zvbi.CaptureBuf",
-    .tp_doc = PyDoc_STR("Base class for capture data buffers"),
+    .tp_doc = PyDoc_STR("Abstract base class for capture data buffers"),
     .tp_basicsize = sizeof(ZvbiCaptureBufObj),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
-    .tp_new = ZvbiCaptureBuf_new,
+    .tp_new = NULL,  // abstract base, not to be instantiated
     .tp_dealloc = (destructor) ZvbiCaptureBuf_dealloc,
 };
 
@@ -163,7 +161,7 @@ PyObject * ZvbiCaptureSlicedBuf_FromPtr(vbi_capture_buffer * ptr)
 PyObject * ZvbiCaptureSlicedBuf_FromData(vbi_sliced * data, int n_lines, double timestamp)
 {
     ZvbiCaptureBufObj * self = (ZvbiCaptureBufObj*) ZvbiCaptureBuf_new(&ZvbiCaptureSlicedBufTypeDef, NULL, NULL);
-    self->buf = malloc(sizeof(vbi_capture_buffer));
+    self->buf = PyMem_RawMalloc(sizeof(vbi_capture_buffer));
     self->buf->data = data;
     self->buf->size = n_lines * sizeof(vbi_sliced);
     self->buf->timestamp = timestamp;

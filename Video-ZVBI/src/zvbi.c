@@ -21,6 +21,10 @@
 #include "zvbi_proxy.h"
 #include "zvbi_rawdec.h"
 #include "zvbi_capture_buf.h"
+#include "zvbi_service_dec.h"
+#include "zvbi_page.h"
+#include "zvbi_export.h"
+#include "zvbi_search.h"
 
 /* Version of library that contains all used interfaces
  * (which was released 2007, so we do not bother supporting older ones) */
@@ -50,26 +54,7 @@ typedef uint32_t vbi_service_set;
 //typedef uint32_t vbi_videostd_set;
 //TODO vbi_page_type T_ENUM
 
-/*
- *  Types of object classes. Note the class name using in blessing is
- *  automatically derived from the type name via the typemap, hence the
- *  type names must match the PACKAGE names below except for the case.
- */
-typedef vbi_export VbiExportObj;
-typedef vbi_search VbiSearchObj;
-
-typedef PyObject SV; // XXX temporary
-
-typedef struct {
-        vbi_decoder *   ctx;
-        SV *            old_ev_cb;
-        SV *            old_ev_user_data;
-} VbiVtObj;
-
-typedef struct vbi_page_obj_struct {
-        vbi_page *      p_pg;
-        vbi_bool        do_free_pg;
-} VbiPageObj;
+#if 0
 
 typedef struct vbi_dvb_mux_obj_struct {
         vbi_dvb_mux *   ctx;
@@ -103,556 +88,8 @@ typedef struct vbi_xds_demux_obj_struct {
         SV *            demux_user_data;
 } VbiXds_DemuxObj;
 
-/*
- * Constants for the "draw" functions
- */
-#define DRAW_TTX_CELL_WIDTH     12
-#define DRAW_TTX_CELL_HEIGHT    10
-#define DRAW_CC_CELL_WIDTH      16
-#define DRAW_CC_CELL_HEIGHT     26
-#define GET_CANVAS_TYPE(FMT)    (((FMT)==VBI_PIXFMT_PAL8) ? sizeof(uint8_t) : sizeof(vbi_rgba))
-
-#if !defined(UTF8_MAXBYTES)
-#define UTF8_MAXBYTES 4         /* max length of an UTF-8 encoded Unicode character */
-#endif
-
-#if 0
-/*
- * Static storage for callback function references
- */
-#if defined (MY_CXT)
-#define MY_CXT_KEY "Video::ZVBI::_statics" XS_VERSION
-
-#else /* versions older than Perl 5.8 didn't support thread-safe static data */
-#define START_MY_CXT    static my_cxt_t zvbi_xs_my_cxt;
-#define dMY_CXT         extern int __unused_dMY_CXT
-#define MY_CXT_INIT
-#define MY_CXT          zvbi_xs_my_cxt
-#endif
-
-/*
- * Structure which is used to store callback function references and user data.
- * Required because we need to replace the callback function pointer given to
- * the C library with a wrapper function which invokes the Perl interpreter.
- */
-typedef struct
-{
-        SV *            p_cb;
-        SV *            p_data;
-        void *          p_obj;
-} zvbi_xs_cb_t;
-
-#define ZVBI_MAX_CB_COUNT   10
-
-typedef struct {
-        zvbi_xs_cb_t    event[ZVBI_MAX_CB_COUNT];
-        zvbi_xs_cb_t    search[ZVBI_MAX_CB_COUNT];
-        zvbi_xs_cb_t    log[ZVBI_MAX_CB_COUNT];
-} my_cxt_t;
-
-START_MY_CXT
-
-#define PVOID2INT(X)    ((int)((long)(X)))
-#define PVOID2UINT(X)   ((unsigned int)((unsigned long)(X)))
-#define INT2PVOID(X)    ((void *)((long)(X)))
-#define UINT2PVOID(X)   ((void *)((unsigned long)(X)))
-
-#define Save_SvREFCNT_dec(P) do{if ((P)!=NULL) {SvREFCNT_dec(P);}}while(0)
-
-static unsigned
-zvbi_xs_alloc_callback( zvbi_xs_cb_t * p_list, SV * p_cb, SV * p_data, void * p_obj )
-{
-        unsigned idx;
-
-        for (idx = 0; idx < ZVBI_MAX_CB_COUNT; idx++) {
-                if (p_list[idx].p_cb == NULL) {
-                        p_list[idx].p_cb = SvREFCNT_inc(p_cb);
-                        p_list[idx].p_data = SvREFCNT_inc(p_data);
-                        p_list[idx].p_obj = p_obj;
-                        break;
-                }
-        }
-        return idx;
-}
-
-static void
-zvbi_xs_free_callback_by_idx( zvbi_xs_cb_t * p_list, unsigned idx )
-{
-        if (p_list[idx].p_cb != NULL) {
-                SvREFCNT_dec(p_list[idx].p_cb);
-                p_list[idx].p_cb = NULL;
-        }
-        if (p_list[idx].p_data != NULL) {
-                SvREFCNT_dec(p_list[idx].p_data);
-                p_list[idx].p_data = NULL;
-        }
-        p_list[idx].p_obj = NULL;
-}
-
-static unsigned
-zvbi_xs_free_callback_by_ptr( zvbi_xs_cb_t * p_list, void * p_obj,
-                              SV * p_cb, SV * p_data, vbi_bool cmp_data )
-{
-        unsigned match_idx = ZVBI_MAX_CB_COUNT;
-        unsigned idx;
-
-        for (idx = 0; idx < ZVBI_MAX_CB_COUNT; idx++) {
-                if ((p_list[idx].p_obj == p_obj) &&
-                    (p_list[idx].p_cb == p_cb) &&
-                    (!cmp_data || (p_list[idx].p_data == p_data))){
-
-                        zvbi_xs_free_callback_by_idx(p_list, idx);
-
-                        match_idx = idx;
-                }
-        }
-        return match_idx;
-}
-
-static void
-zvbi_xs_free_callback_by_obj( zvbi_xs_cb_t * p_list, void * p_obj )
-{
-        unsigned idx;
-
-        for (idx = 0; idx < ZVBI_MAX_CB_COUNT; idx++) {
-                if (p_list[idx].p_obj == p_obj) {
-                        zvbi_xs_free_callback_by_idx(p_list, idx);
-                }
-        }
-}
-
-#define CHECK_LIBZVBI_SYM(A,B,C,NAME)
-
 #define zvbi_(NAME) vbi_ ## NAME
 
-static vbi_bool
-zvbi_xs_load_optional_symbols( void )
-{
-        return TRUE;
-}
-
-
-#define hv_store_sv(HVPTR, NAME, SVPTR) hv_store (HVPTR, #NAME, strlen(#NAME), (SV*)(SVPTR), 0)
-#define hv_store_pv(HVPTR, NAME, STR)   hv_store_sv (HVPTR, NAME, newSVpv ((STR), 0))
-#define hv_store_iv(HVPTR, NAME, VAL)   hv_store_sv (HVPTR, NAME, newSViv (VAL))
-#define hv_store_nv(HVPTR, NAME, VAL)   hv_store_sv (HVPTR, NAME, newSVnv (VAL))
-#define hv_store_rv(HVPTR, NAME, VAL)   hv_store_sv (HVPTR, NAME, newRV_noinc (VAL))
-
-#define hv_fetch_pv(HVPTR, NAME)        hv_fetch (HVPTR, #NAME, strlen(#NAME), 0)
-
-/*
- * Convert event description structs into Perl hashes
- */
-static void
-zvbi_xs_page_link_to_hv( HV * hv, vbi_link * p_ld )
-{
-        hv_store_iv(hv, type, p_ld->type);
-        hv_store_iv(hv, eacem, p_ld->eacem);
-        if (p_ld->name[0] != 0) {
-                hv_store_pv(hv, name, (char*)p_ld->name);
-        }
-        if (p_ld->url[0] != 0) {
-                hv_store_pv(hv, url, (char*)p_ld->url);
-        }
-        if (p_ld->script[0] != 0) {
-                hv_store_pv(hv, script, (char*)p_ld->script);
-        }
-        hv_store_iv(hv, nuid, p_ld->nuid);
-        hv_store_iv(hv, pgno, p_ld->pgno);
-        hv_store_iv(hv, subno, p_ld->subno);
-        hv_store_nv(hv, expires, p_ld->expires);
-        hv_store_iv(hv, itv_type, p_ld->itv_type);
-        hv_store_iv(hv, priority, p_ld->priority);
-        hv_store_iv(hv, autoload, p_ld->autoload);
-}
-
-static void
-zvbi_xs_aspect_ratio_to_hv( HV * hv, vbi_aspect_ratio * p_asp )
-{
-        hv_store_iv(hv, first_line, p_asp->first_line);
-        hv_store_iv(hv, last_line, p_asp->last_line);
-        hv_store_nv(hv, ratio, p_asp->ratio);
-        hv_store_iv(hv, film_mode, p_asp->film_mode);
-        hv_store_iv(hv, open_subtitles, p_asp->open_subtitles);
-}
-
-static void
-zvbi_xs_prog_info_to_hv( HV * hv, vbi_program_info * p_pi )
-{
-        hv_store_iv(hv, future, p_pi->future);
-        if (p_pi->month != -1) {
-                hv_store_iv(hv, month, p_pi->month);
-                hv_store_iv(hv, day, p_pi->day);
-                hv_store_iv(hv, hour, p_pi->hour);
-                hv_store_iv(hv, min, p_pi->min);
-        }
-        hv_store_iv(hv, tape_delayed, p_pi->tape_delayed);
-        if (p_pi->length_hour != -1) {
-                hv_store_iv(hv, length_hour, p_pi->length_hour);
-                hv_store_iv(hv, length_min, p_pi->length_min);
-        }
-        if (p_pi->elapsed_hour != -1) {
-                hv_store_iv(hv, elapsed_hour, p_pi->elapsed_hour);
-                hv_store_iv(hv, elapsed_min, p_pi->elapsed_min);
-                hv_store_iv(hv, elapsed_sec, p_pi->elapsed_sec);
-        }
-        if (p_pi->title[0] != 0) {
-                hv_store_pv(hv, title, (char*)p_pi->title);
-        }
-        if (p_pi->type_classf != VBI_PROG_CLASSF_NONE) {
-                hv_store_iv(hv, type_classf, p_pi->type_classf);
-        }
-        if (p_pi->type_classf == VBI_PROG_CLASSF_EIA_608) {
-                AV * av = newAV();
-                int idx;
-                for (idx = 0; (idx < 33) && (p_pi->type_id[idx] != 0); idx++) {
-                        av_push(av, newSViv(p_pi->type_id[idx]));
-                }
-                hv_store_rv(hv, type_id, (SV*)av);
-        }
-        if (p_pi->rating_auth != VBI_RATING_AUTH_NONE) {
-                hv_store_iv(hv, rating_auth, p_pi->rating_auth);
-                hv_store_iv(hv, rating_id, p_pi->rating_id);
-        }
-        if (p_pi->rating_auth == VBI_RATING_AUTH_TV_US) {
-                hv_store_iv(hv, rating_dlsv, p_pi->rating_dlsv);
-        }
-        if (p_pi->audio[0].mode != VBI_AUDIO_MODE_UNKNOWN) {
-                hv_store_iv(hv, mode_a, p_pi->audio[0].mode);
-                if (p_pi->audio[0].language != NULL) {
-                        hv_store_pv(hv, language_a, (char*)p_pi->audio[0].language);
-                }
-        }
-        if (p_pi->audio[1].mode != VBI_AUDIO_MODE_UNKNOWN) {
-                hv_store_iv(hv, mode_b, p_pi->audio[1].mode);
-                if (p_pi->audio[1].language != NULL) {
-                        hv_store_pv(hv, language_b, (char*)p_pi->audio[1].language);
-                }
-        }
-        if (p_pi->caption_services != -1) {
-                AV * av = newAV();
-                int idx;
-                hv_store_iv(hv, caption_services, p_pi->caption_services);
-                for (idx = 0; idx < 8; idx++) {
-                        av_push(av, newSVpv((char*)p_pi->caption_language[idx], 0));
-                }
-                hv_store_rv(hv, caption_language, (SV*)av);
-        }
-        if (p_pi->cgms_a != -1) {
-                hv_store_iv(hv, cgms_a, p_pi->cgms_a);
-        }
-        if (p_pi->aspect.first_line != -1) {
-                HV * hv = newHV();
-                zvbi_xs_aspect_ratio_to_hv(hv, &p_pi->aspect);
-                hv_store_rv(hv, aspect, (SV*)hv);
-        }
-        if (p_pi->description[0][0] != 0) {
-                AV * av = newAV();
-                int idx;
-                for (idx = 0; idx < 8; idx++) {
-                        av_push(av, newSVpv((char*)p_pi->description[idx], 0));
-                }
-                hv_store_rv(hv, description, (SV*)av);
-        }
-}
-
-static void
-zvbi_xs_event_to_hv( HV * hv, vbi_event * ev )
-{
-        if (ev->type == VBI_EVENT_TTX_PAGE) {
-                hv_store_iv(hv, pgno, ev->ev.ttx_page.pgno);
-                hv_store_iv(hv, subno, ev->ev.ttx_page.subno);
-                hv_store_iv(hv, pn_offset, ev->ev.ttx_page.pn_offset);
-                hv_store_sv(hv, raw_header, newSVpv((char*)ev->ev.ttx_page.raw_header, 40));
-                hv_store_iv(hv, roll_header, ev->ev.ttx_page.roll_header);
-                hv_store_iv(hv, header_update, ev->ev.ttx_page.header_update);
-                hv_store_iv(hv, clock_update, ev->ev.ttx_page.clock_update);
-
-        } else if (ev->type == VBI_EVENT_CAPTION) {
-                hv_store_iv(hv, pgno, ev->ev.ttx_page.pgno);
-
-        } else if (   (ev->type == VBI_EVENT_NETWORK)
-                   || (ev->type == VBI_EVENT_NETWORK_ID) ) {
-                hv_store_iv(hv, nuid, ev->ev.network.nuid);
-                if (ev->ev.network.name[0] != 0) {
-                        hv_store_pv(hv, name, ev->ev.network.name);
-                }
-                if (ev->ev.network.call[0] != 0) {
-                        hv_store_pv(hv, call, ev->ev.network.call);
-                }
-                hv_store_iv(hv, tape_delay, ev->ev.network.tape_delay);
-                hv_store_iv(hv, cni_vps, ev->ev.network.cni_vps);
-                hv_store_iv(hv, cni_8301, ev->ev.network.cni_8301);
-                hv_store_iv(hv, cni_8302, ev->ev.network.cni_8302);
-                hv_store_iv(hv, cycle, ev->ev.network.cycle);
-
-        } else if (ev->type == VBI_EVENT_TRIGGER) {
-                zvbi_xs_page_link_to_hv(hv, ev->ev.trigger);
-        } else if (ev->type == VBI_EVENT_ASPECT) {
-                zvbi_xs_aspect_ratio_to_hv(hv, &ev->ev.aspect);
-        } else if (ev->type == VBI_EVENT_PROG_INFO) {
-                zvbi_xs_prog_info_to_hv(hv, ev->ev.prog_info);
-        }
-}
-
-static HV *
-zvbi_xs_export_info_to_hv( vbi_export_info * p_info )
-{
-        HV * hv = newHV();
-
-        hv_store_pv(hv, keyword, p_info->keyword);
-        hv_store_pv(hv, label, p_info->label);
-        hv_store_pv(hv, tooltip, p_info->tooltip);
-        hv_store_pv(hv, mime_type, p_info->mime_type);
-        hv_store_pv(hv, extension, p_info->extension);
-
-        return hv;
-}
-
-static HV *
-zvbi_xs_export_option_info_to_hv( vbi_option_info * p_opt )
-{
-        HV * hv = newHV();
-        vbi_bool has_menu;
-
-        hv_store_iv(hv, type, p_opt->type);
-
-        if (p_opt->keyword != NULL) {
-                hv_store_pv(hv, keyword, p_opt->keyword);
-        }
-        if (p_opt->label != NULL) {
-                hv_store_pv(hv, label, p_opt->label);
-        }
-        if (p_opt->tooltip != NULL) {
-                hv_store_pv(hv, tooltip, p_opt->tooltip);
-        }
-
-        switch (p_opt->type) {
-        case VBI_OPTION_BOOL:
-        case VBI_OPTION_INT:
-        case VBI_OPTION_MENU:
-                hv_store_iv(hv, def, p_opt->def.num);
-                hv_store_iv(hv, min, p_opt->min.num);
-                hv_store_iv(hv, max, p_opt->max.num);
-                hv_store_iv(hv, step, p_opt->step.num);
-                has_menu = (p_opt->menu.num != NULL);
-                break;
-        case VBI_OPTION_REAL:
-                hv_store_nv(hv, def, p_opt->def.dbl);
-                hv_store_nv(hv, min, p_opt->min.dbl);
-                hv_store_nv(hv, max, p_opt->max.dbl);
-                hv_store_nv(hv, step, p_opt->step.dbl);
-                has_menu = (p_opt->menu.dbl != NULL);
-                break;
-        case VBI_OPTION_STRING:
-                if (p_opt->def.str != NULL) {
-                        hv_store_pv(hv, def, p_opt->def.str);
-                }
-                if (p_opt->min.str != NULL) {
-                        hv_store_pv(hv, min, p_opt->min.str);
-                }
-                if (p_opt->max.str != NULL) {
-                        hv_store_pv(hv, max, p_opt->max.str);
-                }
-                if (p_opt->step.str != NULL) {
-                        hv_store_pv(hv, step, p_opt->step.str);
-                }
-                has_menu = (p_opt->menu.str != NULL);
-                break;
-        default:
-                /* error - the caller can detect this case by evaluating the type */
-                has_menu = FALSE;
-                break;
-        }
-
-        if (has_menu && (p_opt->min.num >= 0)) {
-                int idx;
-                AV * av = newAV();
-                av_extend(av, p_opt->max.num);
-
-                for (idx = p_opt->min.num; idx <= p_opt->max.num; idx++) {
-                        switch (p_opt->type) {
-                        case VBI_OPTION_BOOL:
-                        case VBI_OPTION_INT:
-                                av_store(av, idx, newSViv(p_opt->menu.num[idx]));
-                                break;
-                        case VBI_OPTION_REAL:
-                                av_store(av, idx, newSVnv(p_opt->menu.dbl[idx]));
-                                break;
-                        case VBI_OPTION_MENU:
-                        case VBI_OPTION_STRING:
-                                if (p_opt->menu.str[idx] != NULL) {
-                                        av_store(av, idx, newSVpv(p_opt->menu.str[idx], 0));
-                                }
-                                break;
-                        default:
-                                break;
-                        }
-                }
-                hv_store_rv(hv, menu, (SV*)av);
-        }
-
-        return hv;
-}
-
-/*
- * Invoke callback for an event generated by the VT decoder
- */
-static void
-zvbi_xs_vt_event_handler( vbi_event * event, void * user_data )
-{
-        dMY_CXT;
-        SV * perl_cb;
-        HV * hv;
-        unsigned cb_idx = PVOID2UINT(user_data);
-
-        if ( (cb_idx < ZVBI_MAX_CB_COUNT) &&
-             ((perl_cb = MY_CXT.event[cb_idx].p_cb) != NULL) ) {
-
-                dSP ;
-                ENTER ;
-                SAVETMPS ;
-
-                hv = newHV();
-                zvbi_xs_event_to_hv(hv, event);
-
-                /* push the function parameters on the Perl interpreter stack */
-                /* NOTE: must be kept in sync with the alternate event handler below! */
-                PUSHMARK(SP) ;
-                XPUSHs(sv_2mortal (newSViv (event->type)));
-                XPUSHs(sv_2mortal (newRV_noinc ((SV*)hv)));
-                if (MY_CXT.event[cb_idx].p_data != NULL) {
-                        XPUSHs(MY_CXT.event[cb_idx].p_data);
-                }
-                PUTBACK ;
-
-                /* invoke the Perl subroutine */
-                call_sv(perl_cb, G_VOID | G_DISCARD) ;
-
-                FREETMPS ;
-                LEAVE ;
-        }
-}
-
-/*
- * Alternate event callback, for event handlers with old register semantics.
- * The old semantics allow for only one callback (across all event types)
- * i.e. when a second one is installed the previous handler is removed.
- */
-static void
-zvbi_xs_vt_event_handler_old( vbi_event * event, void * user_data )
-{
-        VbiVtObj * ctx = user_data;
-        HV * hv;
-
-        if ((ctx != NULL) && (ctx->old_ev_cb != NULL)) {
-                dSP ;
-                ENTER ;
-                SAVETMPS ;
-
-                hv = newHV();
-                zvbi_xs_event_to_hv(hv, event);
-
-                /* push the function parameters on the Perl interpreter stack */
-                /* NOTE: must be kept in sync with the new event handler above! */
-                PUSHMARK(SP) ;
-                XPUSHs(sv_2mortal (newSViv (event->type)));
-                XPUSHs(sv_2mortal (newRV_noinc ((SV*)hv)));
-                if (ctx->old_ev_user_data != NULL) {
-                        XPUSHs(ctx->old_ev_user_data);
-                }
-                PUTBACK ;
-
-                /* invoke the Perl subroutine */
-                call_sv(ctx->old_ev_cb, G_VOID | G_DISCARD) ;
-
-                FREETMPS ;
-                LEAVE ;
-        }
-}
-
-/*
- * Invoke callback for the search in the teletext cache
- * Callback can return FALSE to abort the search.
- */
-static int
-zvbi_xs_search_progress( vbi_page * p_pg, unsigned cb_idx )
-{
-        dMY_CXT;
-        SV * perl_cb;
-        SV * sv;
-        VbiPageObj * pg_obj;
-
-        I32  count;
-        int  result = TRUE;
-
-        if ( (cb_idx < ZVBI_MAX_CB_COUNT) &&
-             ((perl_cb = MY_CXT.search[cb_idx].p_cb) != NULL) ) {
-                dSP ;
-                ENTER ;
-                SAVETMPS ;
-
-                Newxz(pg_obj, 1, VbiPageObj);
-                pg_obj->do_free_pg = FALSE;
-                pg_obj->p_pg = p_pg;
-
-                sv = newSV(0);
-                sv_setref_pv(sv, "Video::ZVBI::page", (void*)pg_obj);
-
-                /* push the function parameters on the Perl interpreter stack */
-                PUSHMARK(SP) ;
-                XPUSHs(sv_2mortal (sv));
-                if (MY_CXT.search[cb_idx].p_data != NULL) {
-                        XPUSHs(MY_CXT.search[cb_idx].p_data);
-                }
-                PUTBACK ;
-
-                /* invoke the Perl subroutine */
-                count = call_sv(perl_cb, G_SCALAR) ;
-
-                SPAGAIN ;
-
-                if (count == 1) {
-                        result = POPi;
-                }
-
-                FREETMPS ;
-                LEAVE ;
-        }
-        return result;
-}
-
-/*
- * The search callbacks don't support user data, so instead of passing an
- * array index through, the index is resurrected by using different functions.
- */
-static int zvbi_xs_search_progress_0( vbi_page * p_pg ) { return zvbi_xs_search_progress(p_pg, 0); }
-static int zvbi_xs_search_progress_1( vbi_page * p_pg ) { return zvbi_xs_search_progress(p_pg, 1); }
-static int zvbi_xs_search_progress_2( vbi_page * p_pg ) { return zvbi_xs_search_progress(p_pg, 2); }
-static int zvbi_xs_search_progress_3( vbi_page * p_pg ) { return zvbi_xs_search_progress(p_pg, 3); }
-static int zvbi_xs_search_progress_4( vbi_page * p_pg ) { return zvbi_xs_search_progress(p_pg, 4); }
-static int zvbi_xs_search_progress_5( vbi_page * p_pg ) { return zvbi_xs_search_progress(p_pg, 5); }
-static int zvbi_xs_search_progress_6( vbi_page * p_pg ) { return zvbi_xs_search_progress(p_pg, 6); }
-static int zvbi_xs_search_progress_7( vbi_page * p_pg ) { return zvbi_xs_search_progress(p_pg, 7); }
-static int zvbi_xs_search_progress_8( vbi_page * p_pg ) { return zvbi_xs_search_progress(p_pg, 8); }
-static int zvbi_xs_search_progress_9( vbi_page * p_pg ) { return zvbi_xs_search_progress(p_pg, 9); }
-
-static int (* const zvbi_xs_search_cb_list[ZVBI_MAX_CB_COUNT])( vbi_page * pg ) =
-{
-        zvbi_xs_search_progress_0,
-        zvbi_xs_search_progress_1,
-        zvbi_xs_search_progress_2,
-        zvbi_xs_search_progress_3,
-        zvbi_xs_search_progress_4,
-        zvbi_xs_search_progress_5,
-        zvbi_xs_search_progress_6,
-        zvbi_xs_search_progress_7,
-        zvbi_xs_search_progress_8,
-        zvbi_xs_search_progress_9,
-};
-#if (ZVBI_MAX_CB_COUNT) != 10
-#error "Search progress callback function list length mismatch"
-#endif
 
 /*
  * Invoke callback in DVB PES and TS multiplexer to process generated
@@ -980,200 +417,6 @@ zvbi_xs_sv_buffer_prep( SV * sv_buf, STRLEN buf_size )
         return SvPV_force(sv_buf, l);
 }
 
-/*
- * Grow the given scalar to at least the requested size for use as image buffer
- * and optionally zero the memory (i.e. blank the image)
- */
-static void *
-zvbi_xs_sv_canvas_prep( SV * sv_buf, STRLEN buf_size, vbi_bool blank )
-{
-        char * p_str;
-        STRLEN l;
-
-        if (!SvPOK(sv_buf))  {
-                sv_setpv(sv_buf, "");
-        }
-        p_str = SvPV_force(sv_buf, l);
-        if (l < buf_size) {
-                SvGROW(sv_buf, buf_size + 1);
-                SvCUR_set(sv_buf, buf_size);
-                p_str = SvPV_force(sv_buf, l);
-
-                Zero(p_str, buf_size, char);
-        } else if (blank) {
-                Zero(p_str, buf_size, char);
-        }
-        return p_str;
-}
-
-static SV *
-zvbi_xs_convert_rgba_to_xpm( VbiPageObj * pg_obj, const vbi_rgba * p_img,
-                             int pix_width, int pix_height, int scale )
-{
-        int idx;
-        HV * hv;
-        char key[20];
-        char code[2];
-        int col_idx;
-        char * p_key;
-        I32 key_len;
-        int row;
-        int col;
-        STRLEN buf_size;
-        SV * sv_xpm;
-        SV * sv_tmp;
-        SV ** p_sv;
-
-        /*
-         * Determine the color palette
-         */
-        hv = newHV();
-        col_idx = 0;
-        for (idx = 0; idx < pix_width * pix_height; idx++) {
-                sprintf(key, "%06X", p_img[idx] & 0xFFFFFF);
-                if (!hv_exists(hv, key, 6)) {
-                        hv_store(hv, key, 6, newSViv(col_idx), 0);
-                        col_idx += 1;
-                }
-        }
-
-        switch (scale) {
-                case 0: pix_height /= 2; break;
-                case 2: pix_height *= 2; break;
-                default: break;
-        }
-
-        /*
-         * Write the image header (including image dimensions)
-         */
-        sv_xpm = newSVpvf("/* XPM */\n"
-                          "static char *image[] = {\n"
-                          "/* width height ncolors chars_per_pixel */\n"
-                          "\"%d %d %d %d\",\n"
-                          "/* colors */\n",
-                          pix_width, pix_height, col_idx, 1);
-
-        /* pre-extend the string to avoid re-alloc */
-        (void *) SvPV(sv_xpm, buf_size);
-        buf_size += col_idx * 15 + 13 + pix_height * (pix_width + 4) + 3;
-        SvGROW(sv_xpm, buf_size + 1);
-
-        /*
-         * Write the color palette
-         */
-        hv_iterinit(hv);
-        while ((sv_tmp = hv_iternextsv(hv, &p_key, &key_len)) != NULL) {
-                int cval;
-                sscanf(p_key, "%X", &cval);
-                sv_catpvf(sv_xpm, "\"%c c #%02X%02X%02X\",\n",
-                                  '0' + (char)SvIV(sv_tmp),
-                                  cval & 0xFF,
-                                  (cval >> 8) & 0xFF,
-                                  (cval >> 16) & 0xFF);
-        }
-
-        /*
-         * Write the image row by row
-         */
-        sv_catpv(sv_xpm, "/* pixels */\n");
-        code[1] = 0;
-        for (row = 0; row < pix_height; row++) {
-                sv_catpv(sv_xpm, "\"");
-                for (col = 0; col < pix_width; col++) {
-                        sprintf(key, "%06X", *(p_img++) & 0xFFFFFF);
-                        p_sv = hv_fetch(hv, key, 6, 0);
-                        if (p_sv != NULL) {
-                                code[0] = '0' + SvIV(*p_sv);
-                        } else {
-                                code[0] = 0;  /* should never happen */
-                        }
-                        sv_catpvn(sv_xpm, code, 1);
-                }
-                sv_catpv(sv_xpm, "\",\n");
-
-                if (scale == 0) {
-                        p_img += pix_width;
-                } else if ((scale == 2) && ((row & 1) == 0)) {
-                        p_img -= pix_width;
-                }
-        }
-        sv_catpv(sv_xpm, "};\n");
-        SvREFCNT_dec(hv);
-
-        return sv_xpm;
-
-}
-
-static SV *
-zvbi_xs_convert_pal8_to_xpm( VbiPageObj * pg_obj, const uint8_t * p_img,
-                             int pix_width, int pix_height, int scale )
-{
-        int idx;
-        int row;
-        int col;
-        STRLEN buf_size;
-        SV * sv_xpm;
-        static const uint8_t col_codes[40] = " 1234567.BCDEFGHIJKLMNOPabcdefghijklmnop";
-
-        switch (scale) {
-                case 0: pix_height /= 2; break;
-                case 2: pix_height *= 2; break;
-                default: break;
-        }
-
-        /*
-         * Write the image header (including image dimensions)
-         */
-        sv_xpm = newSVpvf("/* XPM */\n"
-                          "static char *image[] = {\n"
-                          "/* width height ncolors chars_per_pixel */\n"
-                          "\"%d %d %d %d\",\n"
-                          "/* colors */\n",
-                          pix_width, pix_height, 40, 1);
-
-        /* pre-extend the string to avoid re-alloc */
-        (void *) SvPV(sv_xpm, buf_size);
-        buf_size += 40 * 15 + 13 + pix_height * (pix_width + 4) + 3;
-        SvGROW(sv_xpm, buf_size + 1);
-
-        /*
-         * Write the color palette (always the complete palette, including unused colors)
-         */
-        for (idx = 0; idx < 40; idx++) {
-                sv_catpvf(sv_xpm, "\"%c c #%02X%02X%02X\",\n",
-                                  col_codes[idx],
-                                  pg_obj->p_pg->color_map[idx] & 0xFF,
-                                  (pg_obj->p_pg->color_map[idx] >> 8) & 0xFF,
-                                  (pg_obj->p_pg->color_map[idx] >> 16) & 0xFF);
-        }
-
-        /*
-         * Write the image row by row
-         */
-        sv_catpv(sv_xpm, "/* pixels */\n");
-        for (row = 0; row < pix_height; row++) {
-                sv_catpv(sv_xpm, "\"");
-                for (col = 0; col < pix_width; col++) {
-                        uint8_t c = *(p_img++);
-                        if (c < 40) {
-                                sv_catpvn(sv_xpm, col_codes + c, 1);
-                        } else {
-                                sv_catpvn(sv_xpm, " ", 1);  /* invalid input, i.e. not PAL8 */
-                        }
-                }
-                sv_catpv(sv_xpm, "\",\n");
-
-                if (scale == 0) {
-                        p_img += pix_width;
-                } else if ((scale == 2) && ((row & 1) == 0)) {
-                        p_img -= pix_width;
-                }
-        }
-        sv_catpv(sv_xpm, "};\n");
-
-        return sv_xpm;
-}
-
 // ---------------------------------------------------------------------------
 //  DVB multiplexer
 // ---------------------------------------------------------------------------
@@ -1185,7 +428,6 @@ pes_new(callback=NULL, user_data=NULL)
         CV *            callback
         SV *            user_data
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_pes_mux_new);
         Newxz(RETVAL, 1, VbiDvb_MuxObj);
         if (callback != NULL) {
                 RETVAL->ctx = zvbi_(dvb_pes_mux_new)(zvbi_xs_dvb_mux_handler, RETVAL);
@@ -1209,7 +451,6 @@ ts_new(pid, callback=NULL, user_data=NULL)
         CV *            callback
         SV *            user_data
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_ts_mux_new);
         Newxz(RETVAL, 1, VbiDvb_MuxObj);
         if (callback != NULL) {
                 RETVAL->ctx = zvbi_(dvb_ts_mux_new)(pid, zvbi_xs_dvb_mux_handler, RETVAL);
@@ -1231,7 +472,6 @@ void
 DESTROY(mx)
         VbiDvb_MuxObj * mx
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_mux_delete);
         zvbi_(dvb_mux_delete)(mx->ctx);
         Save_SvREFCNT_dec(mx->mux_cb);
         Save_SvREFCNT_dec(mx->mux_user_data);
@@ -1241,7 +481,6 @@ void
 vbi_dvb_mux_reset(mx)
         VbiDvb_MuxObj * mx
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_mux_reset);
         zvbi_(dvb_mux_reset)(mx->ctx);
 
 vbi_bool
@@ -1264,7 +503,6 @@ vbi_dvb_mux_cor(mx, sv_buf, buffer_left, sv_sliced, sliced_left, service_mask, p
         STRLEN                  raw_size;
         vbi_raw_decoder         rd;
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_mux_cor);
         if (sv_raw != NULL) {
                 Zero(&rd, 1, vbi_raw_decoder);
                 if (hv_raw_par != NULL) {
@@ -1334,7 +572,6 @@ vbi_dvb_mux_feed(mx, sv_sliced, sliced_lines, service_mask, pts, sv_raw=NULL, hv
         STRLEN                  raw_size;
         vbi_raw_decoder         rd;
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_mux_feed);
         if (mx->mux_cb == NULL) {
                 croak("Use of the feed method is not possible in dvb_mux contexts without handler function");
         }
@@ -1378,7 +615,6 @@ unsigned int
 vbi_dvb_mux_get_data_identifier(mx)
         VbiDvb_MuxObj * mx
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_mux_get_data_identifier);
         RETVAL = zvbi_(dvb_mux_get_data_identifier)(mx->ctx);
         OUTPUT:
         RETVAL
@@ -1388,7 +624,6 @@ vbi_dvb_mux_set_data_identifier(mx, data_identifier)
         VbiDvb_MuxObj * mx
         unsigned int    data_identifier
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_mux_set_data_identifier);
         RETVAL = zvbi_(dvb_mux_set_data_identifier)(mx->ctx, data_identifier);
         OUTPUT:
         RETVAL
@@ -1397,7 +632,6 @@ unsigned int
 vbi_dvb_mux_get_min_pes_packet_size(mx)
         VbiDvb_MuxObj * mx
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_mux_get_min_pes_packet_size);
         RETVAL = zvbi_(dvb_mux_get_min_pes_packet_size)(mx->ctx);
         OUTPUT:
         RETVAL
@@ -1406,7 +640,6 @@ unsigned int
 vbi_dvb_mux_get_max_pes_packet_size(mx)
         VbiDvb_MuxObj * mx
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_mux_get_max_pes_packet_size);
         RETVAL = zvbi_(dvb_mux_get_max_pes_packet_size)(mx->ctx);
         OUTPUT:
         RETVAL
@@ -1417,7 +650,6 @@ vbi_dvb_mux_set_pes_packet_size(mx, min_size, max_size)
         unsigned int    min_size
         unsigned int    max_size
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_mux_set_pes_packet_size);
         RETVAL = zvbi_(dvb_mux_set_pes_packet_size)(mx->ctx, min_size, max_size);
         OUTPUT:
         RETVAL
@@ -1439,7 +671,6 @@ dvb_multiplex_sliced(sv_buf, buffer_left, sv_sliced, sliced_left, service_mask, 
         const vbi_sliced *      p_sliced;
         unsigned int            max_lines;
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_multiplex_sliced);
         if (SvPOK(sv_buf)) {
                 p_buf = (void *) SvPV(sv_buf, buf_size);
         } else {
@@ -1491,7 +722,6 @@ dvb_multiplex_raw(sv_buf, buffer_left, sv_raw, raw_left, data_identifier, videos
         const uint8_t *         p_raw;
         STRLEN                  raw_size;
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, dvb_multiplex_raw);
         if (SvPOK(sv_buf)) {
                 p_buf = (void *) SvPV(sv_buf, buf_size);
         } else {
@@ -1643,7 +873,6 @@ vbi_dvb_demux_set_log_fn(dx, mask, log_fn=NULL, user_data=NULL)
         CV *                    log_fn
         SV *                    user_data
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,22, dvb_demux_set_log_fn);
         Save_SvREFCNT_dec(dx->log_cb);
         Save_SvREFCNT_dec(dx->log_user_data);
         if (log_fn != NULL) {
@@ -1734,7 +963,6 @@ vbi_idl_demux_feed_frame(dx, sv_sliced, n_lines)
         vbi_sliced * p_sliced;
         unsigned int max_lines;
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, idl_demux_feed_frame);
         p_sliced = zvbi_xs_sv_to_sliced(sv_sliced, &max_lines);
         if (p_sliced != NULL) {
                 if (n_lines <= max_lines) {
@@ -1829,7 +1057,6 @@ vbi_pfc_demux_feed_frame(dx, sv_sliced, n_lines)
         vbi_sliced * p_sliced;
         unsigned int max_lines;
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, pfc_demux_feed_frame);
         p_sliced = zvbi_xs_sv_to_sliced(sv_sliced, &max_lines);
         if (p_sliced != NULL) {
                 if (n_lines <= max_lines) {
@@ -1920,7 +1147,6 @@ vbi_xds_demux_feed_frame(xd, sv_sliced, n_lines)
         vbi_sliced * p_sliced;
         unsigned int max_lines;
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, xds_demux_feed_frame);
         p_sliced = zvbi_xs_sv_to_sliced(sv_sliced, &max_lines);
         if (p_sliced != NULL) {
                 if (n_lines <= max_lines) {
@@ -1933,1011 +1159,6 @@ vbi_xds_demux_feed_frame(xd, sv_sliced, n_lines)
                 RETVAL = FALSE;
         }
         OUTPUT:
-        RETVAL
-
-// ---------------------------------------------------------------------------
-//  Teletext Page De-Multiplexing & Caching
-// ---------------------------------------------------------------------------
-
-//MODULE = Video::ZVBI  PACKAGE = Video::ZVBI::vt
-
-VbiVtObj *
-decoder_new()
-        CODE:
-        Newxz(RETVAL, 1, VbiVtObj);
-        RETVAL->ctx = vbi_decoder_new();
-        if (RETVAL->ctx == NULL) {
-                Safefree(RETVAL);
-        }
-        OUTPUT:
-        RETVAL
-
-void
-DESTROY(vbi)
-        VbiVtObj * vbi
-        CODE:
-        vbi_decoder_delete(vbi->ctx);
-        Save_SvREFCNT_dec(vbi->old_ev_cb);
-        Save_SvREFCNT_dec(vbi->old_ev_user_data);
-        Safefree(vbi);
-
-void
-decode(vbi, sv_sliced, n_lines, timestamp)
-        VbiVtObj * vbi
-        SV * sv_sliced
-        unsigned int n_lines;
-        double timestamp
-        PREINIT:
-        vbi_sliced * p_sliced;
-        unsigned int max_lines;
-        CODE:
-        p_sliced = zvbi_xs_sv_to_sliced(sv_sliced, &max_lines);
-        if (p_sliced != NULL) {
-                if (n_lines <= max_lines) {
-                        vbi_decode(vbi->ctx, p_sliced, n_lines, timestamp);
-                } else {
-                        croak("Invalid line count %d for buffer size (max. %d lines)", n_lines, max_lines);
-                }
-        }
-
-void
-channel_switched(vbi, nuid=0)
-        VbiVtObj * vbi
-        vbi_nuid nuid
-        CODE:
-        vbi_channel_switched(vbi->ctx, nuid);
-
-void
-classify_page(vbi, pgno)
-        VbiVtObj * vbi
-        vbi_pgno pgno
-        PREINIT:
-        vbi_page_type type;
-        vbi_subno subno;
-        char * language;
-        PPCODE:
-        type = vbi_classify_page(vbi->ctx, pgno, &subno, &language);
-        EXTEND(sp, 3);
-        PUSHs (sv_2mortal (newSViv (type)));
-        PUSHs (sv_2mortal (newSViv (subno)));
-        if (language != NULL)
-                PUSHs (sv_2mortal(newSVpv(language, strlen(language))));
-        else
-                PUSHs (sv_2mortal(newSVpv("", 0)));
-
-void
-set_brightness(vbi, brightness)
-        VbiVtObj * vbi
-        int brightness
-        CODE:
-        vbi_set_brightness(vbi->ctx, brightness);
-
-void
-set_contrast(vbi, contrast)
-        VbiVtObj * vbi
-        int contrast
-        CODE:
-        vbi_set_contrast(vbi->ctx, contrast);
-
-// ---------------------------------------------------------------------------
-//  Teletext Page Caching
-// ---------------------------------------------------------------------------
-
-void
-teletext_set_default_region(vbi, default_region)
-        VbiVtObj * vbi
-        int default_region
-        CODE:
-        vbi_teletext_set_default_region(vbi->ctx, default_region);
-
-void
-teletext_set_level(vbi, level)
-        VbiVtObj * vbi
-        int level
-        CODE:
-        vbi_teletext_set_level(vbi->ctx, level);
-
-VbiPageObj *
-fetch_vt_page(vbi, pgno, subno, max_level=VBI_WST_LEVEL_3p5, display_rows=25, navigation=1)
-        VbiVtObj * vbi
-        int pgno
-        int subno
-        int max_level
-        int display_rows
-        int navigation
-        CODE:
-        /* note the memory is freed by VbiPageObj::DESTROY defined below */
-        Newxz(RETVAL, 1, VbiPageObj);
-        Newx(RETVAL->p_pg, 1, vbi_page);
-        RETVAL->do_free_pg = TRUE;
-        if (!vbi_fetch_vt_page(vbi->ctx, RETVAL->p_pg,
-                               pgno, subno, max_level, display_rows, navigation)) {
-                Safefree(RETVAL->p_pg);
-                Safefree(RETVAL);
-                XSRETURN_UNDEF;
-        }
-        OUTPUT:
-        RETVAL
-
-VbiPageObj *
-fetch_cc_page(vbi, pgno, reset=1)
-        VbiVtObj * vbi
-        vbi_pgno pgno
-        vbi_bool reset
-        CODE:
-        /* note the memory is freed by VbiPageObj::DESTROY defined below */
-        Newxz(RETVAL, 1, VbiPageObj);
-        Newx(RETVAL->p_pg, 1, vbi_page);
-        RETVAL->do_free_pg = TRUE;
-        if (!vbi_fetch_cc_page(vbi->ctx, RETVAL->p_pg, pgno, reset)) {
-                Safefree(RETVAL->p_pg);
-                Safefree(RETVAL);
-                XSRETURN_UNDEF;
-        }
-        OUTPUT:
-        RETVAL
-
-int
-is_cached(vbi, pgno, subno)
-        VbiVtObj * vbi
-        int pgno
-        int subno
-        CODE:
-        RETVAL = vbi_is_cached(vbi->ctx, pgno, subno);
-        OUTPUT:
-        RETVAL
-
-int
-cache_hi_subno(vbi, pgno)
-        VbiVtObj * vbi
-        int pgno
-        CODE:
-        RETVAL = vbi_cache_hi_subno(vbi->ctx, pgno);
-        OUTPUT:
-        RETVAL
-
-void
-page_title(vbi, pgno, subno)
-        VbiVtObj * vbi
-        int pgno
-        int subno
-        PREINIT:
-        char buf[42];
-        PPCODE:
-        if (vbi_page_title(vbi->ctx, pgno, subno, buf)) {
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal(newSVpv(buf, strlen(buf))));
-        }
-
-// ---------------------------------------------------------------------------
-//  Event Handling
-// ---------------------------------------------------------------------------
-
-vbi_bool
-event_handler_add(vbi, event_mask, handler, user_data=NULL)
-        VbiVtObj * vbi
-        int event_mask
-        CV * handler
-        SV * user_data
-        CODE:
-        if (vbi->old_ev_cb != NULL) {
-                warn("Video::ZVBI::vt is overwriting a previous event handler\n"
-                     "Call event_handler_remove to suppress this warning or\n"
-                     "use event_handler_register instead when using multiple callbacks.\n");
-                Save_SvREFCNT_dec(vbi->old_ev_cb);
-                Save_SvREFCNT_dec(vbi->old_ev_user_data);
-                vbi->old_ev_cb = NULL;
-                vbi->old_ev_user_data = NULL;
-        }
-        RETVAL = vbi_event_handler_add(vbi->ctx, event_mask, zvbi_xs_vt_event_handler_old, vbi);
-        if (RETVAL) {
-                vbi->old_ev_cb = SvREFCNT_inc(handler);
-                vbi->old_ev_user_data = SvREFCNT_inc(user_data);
-        }
-        OUTPUT:
-        RETVAL
-
-void
-event_handler_remove(vbi, handler)
-        VbiVtObj * vbi
-        CV * handler
-        CODE:
-        if (vbi->old_ev_cb != NULL) {
-                Save_SvREFCNT_dec(vbi->old_ev_cb);
-                Save_SvREFCNT_dec(vbi->old_ev_user_data);
-                vbi->old_ev_cb = NULL;
-                vbi->old_ev_user_data = NULL;
-        }
-        vbi_event_handler_remove(vbi->ctx, zvbi_xs_vt_event_handler_old);
-
-vbi_bool
-event_handler_register(vbi, event_mask, handler, user_data=NULL)
-        VbiVtObj * vbi
-        int event_mask
-        CV * handler
-        SV * user_data
-        PREINIT:
-        dMY_CXT;
-        unsigned cb_idx;
-        CODE:
-        zvbi_xs_free_callback_by_ptr(MY_CXT.event, vbi, (SV*)handler, user_data, TRUE);
-        cb_idx = zvbi_xs_alloc_callback(MY_CXT.event, (SV*)handler, user_data, vbi);
-        if (cb_idx < ZVBI_MAX_CB_COUNT) {
-                RETVAL = vbi_event_handler_register(vbi->ctx, event_mask,
-                                                    zvbi_xs_vt_event_handler,
-                                                    UINT2PVOID(cb_idx));
-                if (RETVAL == FALSE) {
-                        zvbi_xs_free_callback_by_idx(MY_CXT.event, cb_idx);
-                }
-        } else {
-                RETVAL = FALSE;
-        }
-        OUTPUT:
-        RETVAL
-
-void
-event_handler_unregister(vbi, handler, user_data=NULL)
-        VbiVtObj * vbi
-        CV * handler
-        SV * user_data
-        PREINIT:
-        dMY_CXT;
-        unsigned cb_idx;
-        CODE:
-        cb_idx = zvbi_xs_free_callback_by_ptr(MY_CXT.event, vbi, (SV*)handler, user_data, TRUE);
-        vbi_event_handler_unregister(vbi->ctx, zvbi_xs_vt_event_handler, UINT2PVOID(cb_idx));
-
-
-// ---------------------------------------------------------------------------
-//  Rendering
-// ---------------------------------------------------------------------------
-
-//MODULE = Video::ZVBI  PACKAGE = Video::ZVBI::page
-
-void
-DESTROY(pg_obj)
-        VbiPageObj * pg_obj
-        CODE:
-        if (pg_obj->do_free_pg) {
-                vbi_unref_page(pg_obj->p_pg);
-                Safefree(pg_obj->p_pg);
-        }
-        Safefree(pg_obj);
-
-void
-unref_page(pg_obj)
-        SV * pg_obj
-        CODE:
-        if (SvROK(pg_obj)) {
-                sv_unref(pg_obj);
-        } else {
-                croak("Operand is not a reference");
-        }
-
-SV *
-draw_vt_page(pg_obj, fmt=VBI_PIXFMT_RGBA32_LE, reveal=0, flash_on=0)
-        VbiPageObj * pg_obj
-        vbi_pixfmt fmt
-        int reveal
-        int flash_on
-        PREINIT:
-        int canvas_size;
-        int canvas_type;
-        char * p_buf;
-        int rowstride;
-        CODE:
-        RETVAL = newSVpvn("", 0);
-        canvas_type = GET_CANVAS_TYPE(fmt);  /* prior to 0.2.26 only RGBA is supported */
-        rowstride = pg_obj->p_pg->columns * DRAW_TTX_CELL_WIDTH * canvas_type;
-        canvas_size = rowstride * pg_obj->p_pg->rows * DRAW_TTX_CELL_HEIGHT;
-        p_buf = zvbi_xs_sv_canvas_prep(RETVAL, canvas_size, 1);
-        vbi_draw_vt_page_region(pg_obj->p_pg, fmt, p_buf, rowstride,
-                                0, 0, pg_obj->p_pg->columns, pg_obj->p_pg->rows,
-                                reveal, flash_on);
-        OUTPUT:
-        RETVAL
-
-void
-draw_vt_page_region(pg_obj, fmt, canvas, img_pix_width, col_pix_off, row_pix_off, column, row, width, height, reveal=0, flash_on=0)
-        VbiPageObj * pg_obj
-        vbi_pixfmt fmt
-        SV * canvas
-        int img_pix_width
-        int col_pix_off
-        int row_pix_off
-        int column
-        int row
-        int width
-        int height
-        int reveal
-        int flash_on
-        PREINIT:
-        int canvas_size;
-        int canvas_type;
-        char * p_buf;
-        CODE:
-        if (img_pix_width < 0) {
-                img_pix_width = pg_obj->p_pg->columns * DRAW_TTX_CELL_WIDTH;
-        }
-        if ((width > 0) && (height > 0) &&
-            (column + width <= pg_obj->p_pg->columns) &&
-            (row + height <= pg_obj->p_pg->rows) &&
-            (col_pix_off >= 0) && (row_pix_off >= 0) &&
-            (img_pix_width >= (col_pix_off + (width * DRAW_TTX_CELL_WIDTH)))) {
-
-                canvas_type = GET_CANVAS_TYPE(fmt);  /* prior to 0.2.26 only RGBA is supported */
-                canvas_size = img_pix_width * (row_pix_off + height * DRAW_TTX_CELL_HEIGHT) * canvas_type;
-                p_buf = zvbi_xs_sv_canvas_prep(canvas, canvas_size, 0);
-                vbi_draw_vt_page_region(pg_obj->p_pg, fmt,
-                                        p_buf + (row_pix_off * img_pix_width * canvas_type) + col_pix_off,
-                                        img_pix_width * canvas_type,
-                                        column, row, width, height, reveal, flash_on);
-        } else {
-                croak("invalid width %d or height %d for image width %d and page geometry %dx%d",
-                      width, height, img_pix_width, pg_obj->p_pg->columns, pg_obj->p_pg->rows);
-        }
-        OUTPUT:
-        canvas
-
-SV *
-draw_cc_page(pg_obj, fmt=VBI_PIXFMT_RGBA32_LE)
-        VbiPageObj * pg_obj
-        vbi_pixfmt fmt
-        PREINIT:
-        int canvas_size;
-        int canvas_type;
-        int rowstride;
-        char * p_buf;
-        CODE:
-        RETVAL = newSVpvn("", 0);
-        canvas_type = GET_CANVAS_TYPE(fmt);  /* prior to 0.2.26 only RGBA is supported */
-        rowstride = pg_obj->p_pg->columns * DRAW_CC_CELL_WIDTH * canvas_type;
-        canvas_size = rowstride * pg_obj->p_pg->rows * DRAW_CC_CELL_HEIGHT;
-        p_buf = zvbi_xs_sv_canvas_prep(RETVAL, canvas_size, 1);
-        vbi_draw_cc_page_region(pg_obj->p_pg, fmt, p_buf, rowstride,
-                                0, 0, pg_obj->p_pg->columns, pg_obj->p_pg->rows);
-        OUTPUT:
-        RETVAL
-
-void
-draw_cc_page_region(pg_obj, fmt, canvas, img_pix_width, column, row, width, height)
-        VbiPageObj * pg_obj
-        vbi_pixfmt fmt
-        SV * canvas
-        int img_pix_width
-        int column
-        int row
-        int width
-        int height
-        PREINIT:
-        int canvas_size;
-        int canvas_type;
-        char * p_buf;
-        CODE:
-        if (img_pix_width < 0) {
-                img_pix_width = pg_obj->p_pg->columns * DRAW_CC_CELL_WIDTH;
-        }
-        if ((width > 0) && (height > 0) &&
-            (column + width <= pg_obj->p_pg->columns) &&
-            (row + height <= pg_obj->p_pg->rows) &&
-            (img_pix_width >= width * DRAW_CC_CELL_WIDTH)) {
-
-                canvas_type = GET_CANVAS_TYPE(fmt);  /* prior to 0.2.26 only RGBA is supported */
-                canvas_size = img_pix_width * height * DRAW_CC_CELL_HEIGHT * canvas_type;
-                p_buf = zvbi_xs_sv_canvas_prep(canvas, canvas_size, 0);
-                vbi_draw_cc_page_region(pg_obj->p_pg, fmt, p_buf, img_pix_width * canvas_type,
-                                        column, row, width, height);
-        } else {
-                croak("invalid width %d or height %d for img_pix_width %d and page geometry %dx%d",
-                      width, height, img_pix_width, pg_obj->p_pg->columns, pg_obj->p_pg->rows);
-        }
-        OUTPUT:
-        canvas
-
-SV *
-draw_blank(pg_obj, fmt=VBI_PIXFMT_RGBA32_LE, pix_height=0, img_pix_width=-1)
-        VbiPageObj * pg_obj
-        vbi_pixfmt fmt
-        int pix_height
-        int img_pix_width
-        PREINIT:
-        int canvas_size;
-        int canvas_type;
-        CODE:
-        RETVAL = newSVpvn("", 0);
-        if (pix_height <= 0) {
-                if (pg_obj->p_pg->pgno <= 8) {
-                        pix_height = pg_obj->p_pg->rows * DRAW_CC_CELL_HEIGHT;
-                } else {
-                        pix_height = pg_obj->p_pg->rows * DRAW_TTX_CELL_HEIGHT;
-                }
-        }
-        if (img_pix_width <= 0) {
-                if (pg_obj->p_pg->pgno <= 8) {
-                        img_pix_width = pg_obj->p_pg->columns * DRAW_CC_CELL_WIDTH;
-                } else {
-                        img_pix_width = pg_obj->p_pg->columns * DRAW_TTX_CELL_WIDTH;
-                }
-        }
-        canvas_type = GET_CANVAS_TYPE(fmt);  /* prior to 0.2.26 only RGBA is supported */
-        canvas_size = img_pix_width * pix_height * canvas_type;
-        zvbi_xs_sv_canvas_prep(RETVAL, canvas_size, 1);
-        OUTPUT:
-        RETVAL
-
-SV *
-canvas_to_xpm(pg_obj, sv_canvas, fmt=VBI_PIXFMT_RGBA32_LE, aspect=1, img_pix_width=-1)
-        VbiPageObj * pg_obj
-        SV * sv_canvas
-        vbi_pixfmt fmt
-        vbi_bool aspect;
-        int img_pix_width
-        PREINIT:
-        void * p_img;
-        STRLEN buf_size;
-        int canvas_type;
-        int img_pix_height;
-        int scale;
-        CODE:
-        if (!SvOK(sv_canvas)) {
-                croak("Input buffer is undefined or not a scalar");
-                XSRETURN_UNDEF;
-        }
-        p_img = SvPV(sv_canvas, buf_size);
-        if (img_pix_width <= 0) {
-                if (pg_obj->p_pg->pgno <= 8) {
-                        img_pix_width = pg_obj->p_pg->columns * DRAW_CC_CELL_WIDTH;
-                } else {
-                        img_pix_width = pg_obj->p_pg->columns * DRAW_TTX_CELL_WIDTH;
-                }
-        }
-        if (pg_obj->p_pg->pgno <= 8) {
-                scale = aspect ? 1 : 0;  /* CC: is already line-doubled */
-        } else {
-                scale = aspect ? 2 : 1;  /* TTX: correct aspect ratio by doubling lines in Y dimension */
-        }
-        canvas_type = GET_CANVAS_TYPE(fmt);  /* prior to 0.2.26 only RGBA is supported */
-        if (buf_size % (img_pix_width * canvas_type) != 0) {
-                croak("Input buffer size %d doesn't match img_pix_width %d (pixel size %d)",
-                      (int)buf_size, img_pix_width, canvas_type);
-                XSRETURN_UNDEF;
-        }
-        img_pix_height = buf_size / (img_pix_width * canvas_type);
-        if (fmt == VBI_PIXFMT_RGBA32_LE) {
-                RETVAL = zvbi_xs_convert_rgba_to_xpm(pg_obj, p_img, img_pix_width, img_pix_height, scale);
-        } else {
-                RETVAL = zvbi_xs_convert_pal8_to_xpm(pg_obj, p_img, img_pix_width, img_pix_height, scale);
-        }
-        OUTPUT:
-        RETVAL
-
-void
-get_max_rendered_size()
-        PREINIT:
-        int w, h;
-        PPCODE:
-        vbi_get_max_rendered_size(&w, &h);
-        EXTEND(sp, 2);
-        PUSHs (sv_2mortal (newSVuv (w)));
-        PUSHs (sv_2mortal (newSVuv (h)));
-
-void
-get_vt_cell_size()
-        PREINIT:
-        int w, h;
-        PPCODE:
-        vbi_get_vt_cell_size(&w, &h);
-        EXTEND(sp, 2);
-        PUSHs (sv_2mortal (newSVuv (w)));
-        PUSHs (sv_2mortal (newSVuv (h)));
-
-int
-print_page_region(pg_obj, sv_buf, size, format, table, rtl, column, row, width, height)
-        VbiPageObj * pg_obj
-        SV * sv_buf
-        int size
-        const char * format
-        vbi_bool table
-        vbi_bool rtl
-        int column
-        int row
-        int width
-        int height
-        PREINIT:
-        char * p_buf = zvbi_xs_sv_buffer_prep(sv_buf, size);
-        CODE:
-        RETVAL = vbi_print_page_region(pg_obj->p_pg, p_buf, size,
-                                       format, table, rtl,
-                                       column, row, width, height);
-        p_buf[RETVAL] = 0;
-        SvCUR_set(sv_buf, RETVAL);
-        OUTPUT:
-        sv_buf
-        RETVAL
-
-SV *
-print_page(pg_obj, table=0, rtl=0)
-        VbiPageObj * pg_obj
-        vbi_bool table
-        vbi_bool rtl
-        PREINIT:
-        const int max_size = (40 + 1) * 25 * 4;
-        int size;
-        char * p_buf;
-        CODE:
-        RETVAL = newSVpvn("", 0);
-        p_buf = zvbi_xs_sv_buffer_prep(RETVAL, max_size);
-        size = vbi_print_page_region(pg_obj->p_pg, p_buf, max_size,
-                                     "UTF-8", table, rtl,
-                                     0, 0, pg_obj->p_pg->columns, pg_obj->p_pg->rows);
-        if ((size < 0) || (size >= max_size)) {
-                size = 0;
-        }
-        p_buf[size] = 0;
-        SvCUR_set(RETVAL, size);
-        SvUTF8_on(RETVAL);
-        OUTPUT:
-        RETVAL
-
-void
-get_page_no(pg_obj)
-        VbiPageObj * pg_obj
-        PPCODE:
-        EXTEND(sp, 2);
-        PUSHs (sv_2mortal (newSViv (pg_obj->p_pg->pgno)));
-        PUSHs (sv_2mortal (newSViv (pg_obj->p_pg->subno)));
-
-void
-get_page_size(pg_obj)
-        VbiPageObj * pg_obj
-        PPCODE:
-        EXTEND(sp, 2);
-        PUSHs (sv_2mortal (newSViv (pg_obj->p_pg->rows)));
-        PUSHs (sv_2mortal (newSViv (pg_obj->p_pg->columns)));
-
-void
-get_page_dirty_range(pg_obj)
-        VbiPageObj * pg_obj
-        PPCODE:
-        EXTEND(sp, 3);
-        PUSHs (sv_2mortal (newSViv (pg_obj->p_pg->dirty.y0)));
-        PUSHs (sv_2mortal (newSViv (pg_obj->p_pg->dirty.y1)));
-        PUSHs (sv_2mortal (newSViv (pg_obj->p_pg->dirty.roll)));
-
-AV *
-get_page_color_map(pg_obj)
-        VbiPageObj * pg_obj
-        PREINIT:
-        int idx;
-        CODE:
-        RETVAL = newAV();
-        av_extend(RETVAL, 40);
-        sv_2mortal((SV*)RETVAL); /* see man perlxs */
-        for (idx = 0; idx < 40; idx++) {
-                av_store (RETVAL, idx, newSVuv (pg_obj->p_pg->color_map[idx]));
-        }
-        OUTPUT:
-        RETVAL
-
-AV *
-get_page_text_properties(pg_obj)
-        VbiPageObj * pg_obj
-        PREINIT:
-        STRLEN size;
-        int idx;
-        vbi_char * p;
-        unsigned long val;
-        CODE:
-        RETVAL = newAV();
-        sv_2mortal((SV*)RETVAL); /* see man perlxs */
-        size = pg_obj->p_pg->rows * pg_obj->p_pg->columns;
-        av_extend(RETVAL, size);
-        for (idx = 0; idx < size; idx++) {
-                p = &pg_obj->p_pg->text[idx];
-                val = (p->foreground << 0) |
-                      (p->background << 8) |
-                      ((p->opacity & 0x0F) << 16) |
-                      ((p->size & 0x0F) << 20) |
-                      (p->underline << 24) |
-                      (p->bold << 25) |
-                      (p->italic << 26) |
-                      (p->flash << 27) |
-                      (p->conceal << 28) |
-                      (p->proportional << 29) |
-                      (p->link << 30);
-                av_store (RETVAL, idx, newSViv (val));
-        }
-        OUTPUT:
-        RETVAL
-
-SV *
-get_page_text(pg_obj, all_chars=0)
-        VbiPageObj * pg_obj
-        vbi_bool all_chars
-        PREINIT:
-        int row;
-        int column;
-        STRLEN size;
-        U8 * p_str;
-        U8 * p;
-        vbi_char * t;
-        CODE:
-        /* convert UCS-2 to UTF-8 */
-        size = pg_obj->p_pg->rows * pg_obj->p_pg->columns * 3;
-        Newx(p_str, size + UTF8_MAXBYTES+1 + 1, U8);
-        p = p_str;
-        t = pg_obj->p_pg->text;
-        for (row = 0; row < pg_obj->p_pg->rows; row++) {
-                for (column = 0; column < pg_obj->p_pg->columns; column++) {
-                        /* replace "private use" charaters with space */
-                        UV ucs = (t++)->unicode;
-                        if ((ucs > 0xE000) && (ucs <= 0xF8FF) && !all_chars) {
-                                ucs = 0x20;
-                        }
-                        p = uvuni_to_utf8(p, ucs);
-                        if (p - p_str > size) {
-                                goto end_loops;
-                        }
-                }
-        }
-        end_loops:
-        RETVAL = newSVpvn((char*)p_str, p - p_str);
-        SvUTF8_on(RETVAL);
-        Safefree(p_str);
-        OUTPUT:
-        RETVAL
-
-HV *
-resolve_link(pg_obj, column, row)
-        VbiPageObj * pg_obj
-        int column
-        int row
-        PREINIT:
-        vbi_link ld;
-        CODE:
-        vbi_resolve_link(pg_obj->p_pg, column, row, &ld);
-        RETVAL = newHV();
-        sv_2mortal((SV*)RETVAL); /* see man perlxs */
-        zvbi_xs_page_link_to_hv(RETVAL, &ld);
-        OUTPUT:
-        RETVAL
-
-HV *
-resolve_home(pg_obj)
-        VbiPageObj * pg_obj
-        PREINIT:
-        vbi_link ld;
-        CODE:
-        vbi_resolve_home(pg_obj->p_pg, &ld);
-        RETVAL = newHV();
-        sv_2mortal((SV*)RETVAL); /* see man perlxs */
-        zvbi_xs_page_link_to_hv(RETVAL, &ld);
-        OUTPUT:
-        RETVAL
-
-// ---------------------------------------------------------------------------
-//  Teletext Page Export
-// ---------------------------------------------------------------------------
-
-//MODULE = Video::ZVBI  PACKAGE = Video::ZVBI::export   PREFIX = vbi_export_
-
-VbiExportObj *
-vbi_export_new(keyword, errstr)
-        const char * keyword
-        char * &errstr = NO_INIT
-        INIT:
-        errstr = NULL;
-        OUTPUT:
-        errstr
-        RETVAL
-
-void
-vbi_export_DESTROY(exp)
-        VbiExportObj * exp
-        CODE:
-        vbi_export_delete(exp);
-
-void
-vbi_export_info_enum(index)
-        int index
-        PREINIT:
-        vbi_export_info * p_info;
-        PPCODE:
-        p_info = vbi_export_info_enum(index);
-        if (p_info != NULL) {
-                HV * hv = zvbi_xs_export_info_to_hv(p_info);
-                EXTEND(sp,1);
-                PUSHs (sv_2mortal (newRV_noinc ((SV*)hv)));
-        }
-
-void
-vbi_export_info_keyword(keyword)
-        const char * keyword
-        PREINIT:
-        vbi_export_info * p_info;
-        PPCODE:
-        p_info = vbi_export_info_keyword(keyword);
-        if (p_info != NULL) {
-                HV * hv = zvbi_xs_export_info_to_hv(p_info);
-                EXTEND(sp,1);
-                PUSHs (sv_2mortal (newRV_noinc ((SV*)hv)));
-        }
-
-void
-vbi_export_info_export(exp)
-        VbiExportObj * exp
-        PREINIT:
-        vbi_export_info * p_info;
-        PPCODE:
-        p_info = vbi_export_info_export(exp);
-        if (p_info != NULL) {
-                HV * hv = zvbi_xs_export_info_to_hv(p_info);
-                EXTEND(sp,1);
-                PUSHs (sv_2mortal (newRV_noinc ((SV*)hv)));
-        }
-
-void
-vbi_export_option_info_enum(exp, index)
-        VbiExportObj * exp
-        int index
-        PREINIT:
-        vbi_option_info * p_opt;
-        PPCODE:
-        p_opt = vbi_export_option_info_enum(exp, index);
-        if (p_opt != NULL) {
-                HV * hv = zvbi_xs_export_option_info_to_hv(p_opt);
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal (newRV_noinc ((SV*)hv)));
-        }
-
-void
-vbi_export_option_info_keyword(exp, keyword)
-        VbiExportObj * exp
-        const char *keyword
-        PREINIT:
-        vbi_option_info * p_opt;
-        PPCODE:
-        p_opt = vbi_export_option_info_keyword(exp, keyword);
-        if (p_opt != NULL) {
-                HV * hv = zvbi_xs_export_option_info_to_hv(p_opt);
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal (newRV_noinc ((SV*)hv)));
-        }
-
-vbi_bool
-vbi_export_option_set(exp, keyword, sv)
-        VbiExportObj * exp
-        const char * keyword
-        SV * sv
-        PREINIT:
-        vbi_option_info * p_info;
-        CODE:
-        RETVAL = 0;
-        p_info = vbi_export_option_info_keyword(exp, keyword);
-        if (p_info != NULL) {
-                switch (p_info->type) {
-                case VBI_OPTION_BOOL:
-                case VBI_OPTION_INT:
-                case VBI_OPTION_MENU:
-                        RETVAL = vbi_export_option_set(exp, keyword, SvIV(sv));
-                        break;
-                case VBI_OPTION_REAL:
-                        RETVAL = vbi_export_option_set(exp, keyword, SvNV(sv));
-                        break;
-                case VBI_OPTION_STRING:
-                        RETVAL = vbi_export_option_set(exp, keyword, SvPV_nolen(sv));
-                        break;
-                default:
-                        break;
-                }
-        }
-        OUTPUT:
-        RETVAL
-
-void
-vbi_export_option_get(exp, keyword)
-        VbiExportObj * exp
-        const char * keyword
-        PREINIT:
-        vbi_option_value opt_val;
-        vbi_option_info * p_info;
-        PPCODE:
-        p_info = vbi_export_option_info_keyword(exp, keyword);
-        if (p_info != NULL) {
-                if (vbi_export_option_get(exp, keyword, &opt_val)) {
-                        switch (p_info->type) {
-                        case VBI_OPTION_BOOL:
-                        case VBI_OPTION_INT:
-                        case VBI_OPTION_MENU:
-                                EXTEND(sp, 1);
-                                PUSHs (sv_2mortal (newSViv (opt_val.num)));
-                                break;
-                        case VBI_OPTION_REAL:
-                                EXTEND(sp, 1);
-                                PUSHs (sv_2mortal (newSVnv (opt_val.dbl)));
-                                break;
-                        case VBI_OPTION_STRING:
-                                EXTEND(sp, 1);
-                                PUSHs (sv_2mortal (newSVpv (opt_val.str, 0)));
-                                free(opt_val.str);
-                                break;
-                        default:
-                                break;
-                        }
-                }
-        }
-
-vbi_bool
-vbi_export_option_menu_set(exp, keyword, entry)
-        VbiExportObj * exp
-        const char * keyword
-        int entry
-
-void
-vbi_export_option_menu_get(exp, keyword)
-        VbiExportObj * exp
-        const char * keyword
-        PREINIT:
-        int entry;
-        PPCODE:
-        if (vbi_export_option_menu_get(exp, keyword, &entry)) {
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal (newSViv (entry)));
-        }
-
-vbi_bool
-vbi_export_stdio(exp, fp, pg_obj)
-        VbiExportObj * exp
-        FILE * fp
-        VbiPageObj * pg_obj
-        CODE:
-        RETVAL = vbi_export_stdio(exp, fp, pg_obj->p_pg);
-        OUTPUT:
-        RETVAL
-
-vbi_bool
-vbi_export_file(exp, name, pg_obj)
-        VbiExportObj * exp
-        const char * name
-        VbiPageObj * pg_obj
-        CODE:
-        RETVAL = vbi_export_file(exp, name, pg_obj->p_pg);
-        OUTPUT:
-        RETVAL
-
-int
-vbi_export_mem(exp, sv_buf, pg_obj)
-        VbiExportObj * exp
-        SV * sv_buf
-        VbiPageObj * pg_obj
-        PREINIT:
-        char * p_buf;
-        STRLEN buf_size;
-        CODE:
-        CHECK_LIBZVBI_SYM(0,2,26, export_mem);
-        if (SvOK(sv_buf))  {
-                p_buf = SvPV_force(sv_buf, buf_size);
-                RETVAL = zvbi_(export_mem)(exp, p_buf, buf_size + 1, pg_obj->p_pg);
-        } else {
-                croak("Input buffer is undefined or not a scalar");
-                RETVAL = FALSE;
-        }
-        OUTPUT:
-        sv_buf
-        RETVAL
-
-void
-vbi_export_alloc(exp, pg_obj)
-        VbiExportObj * exp
-        VbiPageObj * pg_obj
-        PREINIT:
-        char * p_buf;
-        size_t buf_size;
-        SV * sv;
-        PPCODE:
-        CHECK_LIBZVBI_SYM(0,2,26, export_alloc);
-        if (zvbi_(export_alloc)(exp, (void**)&p_buf, &buf_size, pg_obj->p_pg)) {
-                sv = newSV(0);
-                sv_usepvn(sv, p_buf, buf_size);
-                /* now the pointer is managed by perl -> no free() */
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal (sv));
-        }
-
-char *
-vbi_export_errstr(exp)
-        VbiExportObj * exp
-
-
-// ---------------------------------------------------------------------------
-//  Search
-// ---------------------------------------------------------------------------
-
-//MODULE = Video::ZVBI  PACKAGE = Video::ZVBI::search   PREFIX = vbi_search_
-
-VbiSearchObj *
-vbi_search_new(vbi, pgno, subno, sv_pattern, casefold=0, regexp=0, progress=NULL, user_data=NULL)
-        VbiVtObj * vbi
-        vbi_pgno pgno
-        vbi_subno subno
-        SV * sv_pattern
-        vbi_bool casefold
-        vbi_bool regexp
-        CV * progress
-        SV * user_data
-        PREINIT:
-        dMY_CXT;
-        uint16_t * p_ucs;
-        uint16_t * p;
-        char * p_utf;
-        const char * p_utf_end;
-        STRLEN len;
-        int rest;
-        unsigned cb_idx;
-        CODE:
-        /* convert pattern string from Perl's utf8 into UCS-2 */
-        p_utf = SvPVutf8_force(sv_pattern, len);
-        p_utf_end = p_utf + len;
-        Newx(p_ucs, len * 2 + 2, uint16_t);
-        p = p_ucs;
-        rest = len;
-        while (rest > 0) {
-                *(p++) = utf8_to_uvchr_buf((U8*)p_utf, p_utf_end, &len);
-                if (len > 0) {
-                        p_utf += len;
-                        rest -= len;
-                } else {
-                        break;
-                }
-        }
-        *p = 0;
-        if (progress == NULL) {
-                RETVAL = vbi_search_new(vbi->ctx, pgno, subno, p_ucs, casefold, regexp, NULL);
-        } else {
-                cb_idx = zvbi_xs_alloc_callback(MY_CXT.search, (SV*)progress, user_data, NULL);
-                if (cb_idx < ZVBI_MAX_CB_COUNT) {
-                        RETVAL = vbi_search_new(vbi->ctx, pgno, subno, p_ucs, casefold, regexp,
-                                                zvbi_xs_search_cb_list[cb_idx]);
-
-                        if (RETVAL != NULL) {
-                                MY_CXT.search[cb_idx].p_obj = RETVAL;
-                        } else {
-                                zvbi_xs_free_callback_by_idx(MY_CXT.search, cb_idx);
-                        }
-                } else {
-                        croak ("Max. search callback count exceeded");
-                        RETVAL = NULL;
-                }
-        }
-        Safefree(p_ucs);
-        OUTPUT:
-        RETVAL
-
-void
-DESTROY(search)
-        VbiSearchObj * search
-        PREINIT:
-        dMY_CXT;
-        CODE:
-        vbi_search_delete(search);
-        zvbi_xs_free_callback_by_obj(MY_CXT.search, search);
-
-int
-vbi_search_next(search, pg_obj, dir)
-        VbiSearchObj * search
-        VbiPageObj * &pg_obj = NO_INIT
-        int dir
-        CODE:
-        Newxz(pg_obj, 1, VbiPageObj);
-        pg_obj->do_free_pg = FALSE;
-        pg_obj->p_pg = NULL;
-        RETVAL = vbi_search_next(search, &pg_obj->p_pg, dir);
-        if (pg_obj->p_pg == NULL) {
-                Safefree(pg_obj);
-                pg_obj = NULL;
-        }
-        OUTPUT:
-        pg_obj
         RETVAL
 
 // ---------------------------------------------------------------------------
@@ -2967,6 +1188,12 @@ par_str(data)
         data
 #endif // 0
 
+//
+// Note this function actually does not use libzvbi "unpar()" internally,
+// as that function modifies the string in place which does not work with
+// python "bytes" and "string" types being immutable; So we use the macro
+// unpar8() instead and combine decoding with conversion to Unicode.
+//
 static PyObject *
 Zvbi_unpar_str(PyObject *self, PyObject *args)
 {
@@ -3058,33 +1285,64 @@ unham24p(data, offset=0)
         OUTPUT:
         RETVAL
 
+#endif
+
 // ---------------------------------------------------------------------------
 //  BCD arithmetic
 // ---------------------------------------------------------------------------
 
-int
-vbi_dec2bcd(dec)
-        unsigned int dec
+static PyObject *
+Zvbi_dec2bcd(PyObject *self, PyObject *args)
+{
+    unsigned int dec;
+    PyObject * RETVAL = NULL;
 
-unsigned int
-vbi_bcd2dec(bcd)
-        unsigned int bcd
+    if (PyArg_ParseTuple(args, "I", &dec)) {
+        RETVAL = PyLong_FromLong(vbi_dec2bcd(dec));
+    }
+    return RETVAL;
+}
 
-unsigned int
-vbi_add_bcd(a, b)
-   unsigned int a
-   unsigned int b
+static PyObject *
+Zvbi_bcd2dec(PyObject *self, PyObject *args)
+{
+    unsigned int bcd;
+    PyObject * RETVAL = NULL;
 
-vbi_bool
-vbi_is_bcd(bcd)
-        unsigned int bcd
-#endif
+    if (PyArg_ParseTuple(args, "I", &bcd)) {
+        RETVAL = PyLong_FromLong(vbi_bcd2dec(bcd));
+    }
+    return RETVAL;
+}
+
+static PyObject *
+Zvbi_add_bcd(PyObject *self, PyObject *args)
+{
+    unsigned int bcd1;
+    unsigned int bcd2;
+    PyObject * RETVAL = NULL;
+
+    if (PyArg_ParseTuple(args, "II", &bcd1, &bcd2)) {
+        RETVAL = PyLong_FromLong(vbi_add_bcd(bcd1, bcd2));
+    }
+    return RETVAL;
+}
+
+static PyObject *
+Zvbi_is_bcd(PyObject *self, PyObject *args)
+{
+    unsigned int bcd;
+    PyObject * RETVAL = NULL;
+
+    if (PyArg_ParseTuple(args, "I", &bcd)) {
+        RETVAL = PyBool_FromLong(vbi_is_bcd(bcd));
+    }
+    return RETVAL;
+}
 
 // ---------------------------------------------------------------------------
 //  Miscellaneous
 // ---------------------------------------------------------------------------
-
-//MODULE = Video::ZVBI  PACKAGE = Video::ZVBI
 
 static PyObject *
 Zvbi_lib_version(PyObject *self, PyObject *args)  // METH_NOARGS
@@ -3135,7 +1393,6 @@ set_log_fn(mask, log_fn=NULL, user_data=NULL)
         dMY_CXT;
         unsigned cb_idx;
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,22, set_log_fn);
         zvbi_xs_free_callback_by_obj(MY_CXT.log, NULL);
         if (log_fn != NULL) {
                 cb_idx = zvbi_xs_alloc_callback(MY_CXT.log, (SV*)log_fn, user_data, NULL);
@@ -3155,7 +1412,6 @@ set_log_on_stderr(mask)
         PREINIT:
         dMY_CXT;
         CODE:
-        CHECK_LIBZVBI_SYM(0,2,22, log_on_stderr);
         zvbi_xs_free_callback_by_obj(MY_CXT.log, NULL);
         zvbi_(set_log_fn)(mask, zvbi_(log_on_stderr), NULL);
 
@@ -3167,7 +1423,6 @@ decode_vps_cni(data)
         unsigned char *p;
         STRLEN len;
         PPCODE:
-        CHECK_LIBZVBI_SYM(0,2,20, decode_vps_cni);
         p = (unsigned char *)SvPV (data, len);
         if (len >= 13) {
                 if (zvbi_(decode_vps_cni)(&cni, p)) {
@@ -3184,7 +1439,6 @@ encode_vps_cni(cni)
         PREINIT:
         uint8_t buffer[13];
         PPCODE:
-        CHECK_LIBZVBI_SYM(0,2,20, encode_vps_cni);
         if (zvbi_(encode_vps_cni)(buffer, cni)) {
                 EXTEND(sp,1);
                 PUSHs (sv_2mortal (newSVpvn ((char*)buffer, 13)));
@@ -3224,7 +1478,6 @@ iconv_caption(sv_src, repl_char=0)
         STRLEN src_len;
         SV * sv;
         PPCODE:
-        CHECK_LIBZVBI_SYM(0,2,23, strndup_iconv_caption);
         p_src = (void *) SvPV(sv_src, src_len);
         p_buf = zvbi_(strndup_iconv_caption)("UTF-8", p_src, src_len, '?');
         if (p_buf != NULL) {
@@ -3246,7 +1499,6 @@ caption_unicode(c, to_upper=0)
         U8 * p;
         SV * sv;
         PPCODE:
-        CHECK_LIBZVBI_SYM(0,2,23, caption_unicode);
         ucs = zvbi_(caption_unicode)(c, to_upper);
         if (ucs != 0) {
                 p = uvuni_to_utf8(buf, ucs);
@@ -3265,6 +1517,11 @@ caption_unicode(c, to_upper=0)
 static PyMethodDef Zvbi_Methods[] =
 {
     {"unpar_str",         Zvbi_unpar_str,         METH_VARARGS, PyDoc_STR("Decode parity and convert to string")},
+
+    {"dec2bcd",           Zvbi_dec2bcd,           METH_VARARGS, NULL},
+    {"bcd2dec",           Zvbi_bcd2dec,           METH_VARARGS, NULL},
+    {"add_bcd",           Zvbi_add_bcd,           METH_VARARGS, NULL},
+    {"is_bcd",            Zvbi_is_bcd,            METH_VARARGS, NULL},
 
     {"lib_version",       Zvbi_lib_version,       METH_NOARGS,  PyDoc_STR("Return tuple with library version")},
     {"check_lib_version", Zvbi_check_lib_version, METH_VARARGS, PyDoc_STR("Check if library version is equal or newer than the given")},
@@ -3304,7 +1561,11 @@ PyInit_Zvbi(void)
     if ((PyInit_Capture(module, ZvbiError) < 0) ||
         (PyInit_Proxy(module, ZvbiError) < 0) ||
         (PyInit_RawDec(module, ZvbiError) < 0) ||
-        (PyInit_CaptureBuf(module, ZvbiError) < 0))
+        (PyInit_CaptureBuf(module, ZvbiError) < 0) ||
+        (PyInit_ServiceDec(module, ZvbiError) < 0) ||
+        (PyInit_Page(module, ZvbiError) < 0) ||
+        (PyInit_Export(module, ZvbiError) < 0) ||
+        (PyInit_Search(module, ZvbiError) < 0))
     {
         Py_DECREF(module);
         return NULL;
