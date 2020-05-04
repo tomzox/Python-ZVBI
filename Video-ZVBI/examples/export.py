@@ -30,7 +30,7 @@ import Zvbi
 
 vtdec = None
 ex = None
-extension = "export"
+extension = "dat"
 export_pgno = -1
 quit = False
 cr = '\r' if sys.stdout.isatty() else "\n"
@@ -134,6 +134,7 @@ def main_func():
     if not len(sys.argv) == 3:
         print("Usage: %s \"module[;option=value]\" pgno <vbi_data >file" % sys.argv[0], file=sys.stderr)
         print("module eg. \"text\" or \"ppm\", pgno eg. 100 (hex) or \"all\"", file=sys.stderr)
+        print("Run explist.py for a list of modules and options", file=sys.stderr)
         sys.exit(-1)
 
     #if sys.stdout.isatty():

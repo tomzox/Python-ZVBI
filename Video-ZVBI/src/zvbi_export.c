@@ -36,6 +36,27 @@ PyObject * ZvbiExportError;
 
 // ---------------------------------------------------------------------------
 
+#define DICT_SET_ITEM_OBJ_STR(KEY, STR) \
+        do { \
+            if (ok && ((STR) != NULL)) { \
+                PyObject * obj = PyUnicode_FromString(STR); \
+                if (obj != NULL) { \
+                    ok = (PyDict_SetItemString(dict, KEY, obj) == 0); \
+        }   }   } while(0)
+#define DICT_SET_ITEM_OBJ_INT(KEY, VAL) \
+        do { \
+            if (ok) { \
+                PyObject * obj = PyLong_FromLong(VAL); \
+                ok = ((obj != NULL) && (PyDict_SetItemString(dict, KEY, obj) == 0)); \
+        }   } while(0)
+#define DICT_SET_ITEM_OBJ_DBL(KEY, VAL) \
+        do { \
+            if (ok) { \
+                PyObject * obj = PyFloat_FromDouble(VAL); \
+                ok = ((obj != NULL) && (PyDict_SetItemString(dict, KEY, obj) == 0)); \
+        }   } while(0)
+
+
 static PyObject *
 zvbi_xs_export_info_to_hv( vbi_export_info * p_info )
 {
@@ -43,34 +64,12 @@ zvbi_xs_export_info_to_hv( vbi_export_info * p_info )
 
     if (dict != NULL) {
         vbi_bool ok = TRUE;
-        PyObject * obj = PyUnicode_FromString(p_info->keyword);
-        if (obj) {
-            ok = (PyDict_SetItemString(dict, "keyword", obj) == 0);
-        }
-        if (ok) {
-            obj = PyUnicode_FromString(p_info->label);
-            if (obj) {
-                ok = (PyDict_SetItemString(dict, "label", obj) == 0);
-            }
-        }
-        if (ok) {
-            obj = PyUnicode_FromString(p_info->tooltip);
-            if (obj) {
-                ok = (PyDict_SetItemString(dict, "tooltip", obj) == 0);
-            }
-        }
-        if (ok) {
-            obj = PyUnicode_FromString(p_info->mime_type);
-            if (obj) {
-                ok = (PyDict_SetItemString(dict, "mime_type", obj) == 0);
-            }
-        }
-        if (ok) {
-            obj = PyUnicode_FromString(p_info->extension);
-            if (obj) {
-                ok = (PyDict_SetItemString(dict, "extension", obj) == 0);
-            }
-        }
+
+        DICT_SET_ITEM_OBJ_STR("keyword", p_info->keyword);
+        DICT_SET_ITEM_OBJ_STR("label", p_info->label);
+        DICT_SET_ITEM_OBJ_STR("tooltip", p_info->tooltip);
+        DICT_SET_ITEM_OBJ_STR("mime_type", p_info->mime_type);
+        DICT_SET_ITEM_OBJ_STR("extension", p_info->extension);
 
         if (!ok) {
             Py_DECREF(dict);
@@ -86,87 +85,95 @@ zvbi_xs_export_option_info_to_hv( vbi_option_info * p_opt )
     PyObject * dict = PyDict_New();
 
     if (dict != NULL) {
-#if 0
         vbi_bool has_menu;
+        vbi_bool ok = TRUE;
 
-        hv_store_iv(hv, type, p_opt->type);
-
-        if (p_opt->keyword != NULL) {
-                hv_store_pv(hv, keyword, p_opt->keyword);
-        }
-        if (p_opt->label != NULL) {
-                hv_store_pv(hv, label, p_opt->label);
-        }
-        if (p_opt->tooltip != NULL) {
-                hv_store_pv(hv, tooltip, p_opt->tooltip);
-        }
+        DICT_SET_ITEM_OBJ_INT("type", p_opt->type);
+        DICT_SET_ITEM_OBJ_STR("keyword", p_opt->keyword);
+        DICT_SET_ITEM_OBJ_STR("label", p_opt->label);
+        DICT_SET_ITEM_OBJ_STR("tooltip", p_opt->tooltip);
 
         switch (p_opt->type) {
-        case VBI_OPTION_BOOL:
-        case VBI_OPTION_INT:
-        case VBI_OPTION_MENU:
-                hv_store_iv(hv, def, p_opt->def.num);
-                hv_store_iv(hv, min, p_opt->min.num);
-                hv_store_iv(hv, max, p_opt->max.num);
-                hv_store_iv(hv, step, p_opt->step.num);
+            case VBI_OPTION_BOOL:
+            case VBI_OPTION_INT:
+            case VBI_OPTION_MENU:
+                DICT_SET_ITEM_OBJ_INT("def", p_opt->def.num);
+                DICT_SET_ITEM_OBJ_INT("min", p_opt->min.num);
+                DICT_SET_ITEM_OBJ_INT("max", p_opt->max.num);
+                DICT_SET_ITEM_OBJ_INT("step", p_opt->step.num);
                 has_menu = (p_opt->menu.num != NULL);
                 break;
-        case VBI_OPTION_REAL:
-                hv_store_nv(hv, def, p_opt->def.dbl);
-                hv_store_nv(hv, min, p_opt->min.dbl);
-                hv_store_nv(hv, max, p_opt->max.dbl);
-                hv_store_nv(hv, step, p_opt->step.dbl);
+
+            case VBI_OPTION_REAL:
+                DICT_SET_ITEM_OBJ_DBL("def", p_opt->def.dbl);
+                DICT_SET_ITEM_OBJ_DBL("min", p_opt->min.dbl);
+                DICT_SET_ITEM_OBJ_DBL("max", p_opt->max.dbl);
+                DICT_SET_ITEM_OBJ_DBL("step", p_opt->step.dbl);
                 has_menu = (p_opt->menu.dbl != NULL);
                 break;
-        case VBI_OPTION_STRING:
-                if (p_opt->def.str != NULL) {
-                        hv_store_pv(hv, def, p_opt->def.str);
-                }
-                if (p_opt->min.str != NULL) {
-                        hv_store_pv(hv, min, p_opt->min.str);
-                }
-                if (p_opt->max.str != NULL) {
-                        hv_store_pv(hv, max, p_opt->max.str);
-                }
-                if (p_opt->step.str != NULL) {
-                        hv_store_pv(hv, step, p_opt->step.str);
-                }
+
+            case VBI_OPTION_STRING:
+                DICT_SET_ITEM_OBJ_STR("def", p_opt->def.str);
+                DICT_SET_ITEM_OBJ_STR("min", p_opt->min.str);
+                DICT_SET_ITEM_OBJ_STR("max", p_opt->max.str);
+                DICT_SET_ITEM_OBJ_STR("step", p_opt->step.str);
                 has_menu = (p_opt->menu.str != NULL);
                 break;
-        default:
+
+            default:
                 /* error - the caller can detect this case by evaluating the type */
                 has_menu = FALSE;
                 break;
         }
 
         if (has_menu && (p_opt->min.num >= 0)) {
-                int idx;
-                AV * av = newAV();
-                av_extend(av, p_opt->max.num);
-
-                for (idx = p_opt->min.num; idx <= p_opt->max.num; idx++) {
-                        switch (p_opt->type) {
+            PyObject * arr = PyTuple_New(p_opt->max.num - p_opt->min.num + 1);
+            if (arr != NULL) {
+                for (int idx = p_opt->min.num; idx <= p_opt->max.num; idx++) {
+                    switch (p_opt->type) {
                         case VBI_OPTION_BOOL:
                         case VBI_OPTION_INT:
-                                av_store(av, idx, newSViv(p_opt->menu.num[idx]));
-                                break;
+                            if (ok) {
+                                PyObject * obj = PyLong_FromLong(p_opt->menu.num[idx]);
+                                ok = ((obj != NULL) && (PyTuple_SetItem(arr, idx, obj) == 0));
+                            }
+                            break;
+
                         case VBI_OPTION_REAL:
-                                av_store(av, idx, newSVnv(p_opt->menu.dbl[idx]));
-                                break;
+                            if (ok) {
+                                PyObject * obj = PyFloat_FromDouble(p_opt->menu.dbl[idx]);
+                                ok = ((obj != NULL) && (PyTuple_SetItem(arr, idx, obj) == 0));
+                            }
+                            break;
+
                         case VBI_OPTION_MENU:
                         case VBI_OPTION_STRING:
-                                if (p_opt->menu.str[idx] != NULL) {
-                                        av_store(av, idx, newSVpv(p_opt->menu.str[idx], 0));
+                            if (p_opt->menu.str[idx] != NULL) {
+                                if (ok) {
+                                    PyObject * obj = PyUnicode_FromString(p_opt->menu.str[idx]);
+                                    ok = ((obj != NULL) && (PyTuple_SetItem(arr, idx, obj) == 0));
                                 }
-                                break;
+                            }
+                            break;
+
                         default:
-                                break;
-                        }
+                            break;
+                    }
                 }
-                hv_store_rv(hv, menu, (SV*)av);
+
+                if (ok) {
+                    ok = (PyDict_SetItemString(dict, "menu", arr) == 0);
+                }
+                else {
+                    Py_DECREF(arr);
+                }
+            }
         }
 
-#endif // 0
+        if (!ok) {
+            Py_DECREF(dict);
+            dict = NULL;
+        }
     }
     return dict;
 }
@@ -218,6 +225,7 @@ ZvbiExport_init(ZvbiExportObj *self, PyObject *args, PyObject *kwds)
     return RETVAL;
 }
 
+// TODO/FIXME use iterator instead
 static PyObject *
 ZvbiExport_info_enum(ZvbiExportObj *self, PyObject *args)
 {
@@ -228,6 +236,9 @@ ZvbiExport_info_enum(ZvbiExportObj *self, PyObject *args)
         vbi_export_info * p_info = vbi_export_info_enum(index);
         if (p_info != NULL) {
             RETVAL = zvbi_xs_export_info_to_hv(p_info);
+        }
+        else {
+            PyErr_SetNone(PyExc_StopIteration);
         }
     }
     return RETVAL;
@@ -244,6 +255,9 @@ ZvbiExport_info_keyword(ZvbiExportObj *self, PyObject *args)
         if (p_info != NULL) {
             RETVAL = zvbi_xs_export_info_to_hv(p_info);
         }
+        else {
+            PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+        }
     }
     return RETVAL;
 }
@@ -257,9 +271,13 @@ ZvbiExport_info_export(ZvbiExportObj *self, PyObject *args)
     if (p_info != NULL) {
         RETVAL = zvbi_xs_export_info_to_hv(p_info);
     }
+    else {
+        PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+    }
     return RETVAL;
 }
 
+// TODO/FIXME use iterator instead
 static PyObject *
 ZvbiExport_option_info_enum(ZvbiExportObj *self, PyObject *args)
 {
@@ -270,6 +288,9 @@ ZvbiExport_option_info_enum(ZvbiExportObj *self, PyObject *args)
         vbi_option_info * p_opt = vbi_export_option_info_enum(self->ctx, index);
         if (p_opt != NULL) {
             RETVAL = zvbi_xs_export_option_info_to_hv(p_opt);
+        }
+        else {
+            PyErr_SetNone(PyExc_StopIteration);
         }
     }
     return RETVAL;
@@ -285,6 +306,9 @@ ZvbiExport_option_info_keyword(ZvbiExportObj *self, PyObject *args)
         vbi_option_info * p_opt = vbi_export_option_info_keyword(self->ctx, keyword);
         if (p_opt != NULL) {
             RETVAL = zvbi_xs_export_option_info_to_hv(p_opt);
+        }
+        else {
+            PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
         }
     }
     return RETVAL;
@@ -494,10 +518,10 @@ ZvbiExport_to_memory(ZvbiExportObj *self, PyObject *args)
 
 static PyMethodDef ZvbiExport_MethodsDef[] =
 {
-    {"info_enum",           (PyCFunction) ZvbiExport_info_enum,           METH_NOARGS | METH_STATIC, NULL },
-    {"info_keyword",        (PyCFunction) ZvbiExport_info_keyword,        METH_NOARGS | METH_STATIC, NULL },
+    {"info_enum",           (PyCFunction) ZvbiExport_info_enum,           METH_VARARGS | METH_STATIC, NULL },
+    {"info_keyword",        (PyCFunction) ZvbiExport_info_keyword,        METH_VARARGS | METH_STATIC, NULL },
 
-    {"info_export",         (PyCFunction) ZvbiExport_info_export,         METH_VARARGS, NULL },
+    {"info_export",         (PyCFunction) ZvbiExport_info_export,         METH_NOARGS,  NULL },
     {"option_info_enum",    (PyCFunction) ZvbiExport_option_info_enum,    METH_VARARGS, NULL },
     {"option_info_keyword", (PyCFunction) ZvbiExport_option_info_keyword, METH_VARARGS, NULL },
 
