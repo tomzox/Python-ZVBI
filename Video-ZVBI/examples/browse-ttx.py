@@ -88,8 +88,8 @@ def cap_init():
         opt_services = Zvbi.VBI_SLICED_TELETEXT_B
         opt_strict = 0
         opt_device = "/dev/vbi0"
-        cap = Zvbi.Capture(opt_device, services=services, scanning=scanning,
-                           buffers=5, strict=opt.strict, trace=opt.verbose)
+        cap = Zvbi.Capture(opt_device, services=opt_services,
+                           buffers=opt_buf_count, strict=opt_strict, trace=opt_verbose)
     else:
         opt_device = "/dev/dvb/adapter0/demux0"
         opt_pid = 104
@@ -103,37 +103,45 @@ def cap_init():
     tid_polling = tk.after_idle(cap_frame)
 
 #
-# Render the teletext page using XPM (image) export
+# Render the teletext page using PPM (image) export
 #
 def pg_display_xpm():
     try:
         pg = vtdec.fetch_vt_page(pg_sched)
         (h, w) = pg.get_page_size()
 
-        # export page in XPM format (only supported starting with 0.2.26)
-        if 0: #XXX try:
-            ex = Zvbi.Export('xpm')
+        if False:
+            # Pixmap class only exists in Perl -> XPM not supported in TkInter
             # suppress all XPM extensions because Pixmap can't handle them
-            ex.option_set('creator', "")
-            ex.option_set('titled', 0)
-            ex.option_set('transparency', 0)
-            tmp = ex.alloc(pg)
-            img_xpm = Pixmap(data=tmp)
+            #ex = Zvbi.Export('xpm')
+            #ex.option_set('creator', "")
+            #ex.option_set('titled', 0)
+            #ex.option_set('transparency', 0)
+            #img_obj = Pixmap(data=img_data)
+            pass
 
-        else: #XXX except Zvbi.ExportError:
+        elif False:
+            # export page in PPM format
+            ex = Zvbi.Export('ppm')
+            img_data = ex.to_memory(pg)
+            img_obj = tk.call("image", "create", "photo", "-data", img_data)
+
+        else:
+            # draw page to RGB canvas & convert to PPM
             # conversion of 8-bit palette image format into XPM is faster
             #fmt = Zvbi.VBI_PIXFMT_PAL8
             fmt = Zvbi.VBI_PIXFMT_RGBA32_LE
             img_canvas = pg.draw_vt_page(fmt=fmt)
-            ppm_data = pg.canvas_to_ppm(img_canvas, fmt, aspect=1)
-            img_xpm = tk.call("image", "create", "photo", "-data", ppm_data)
-            #img_xpm = PhotoImage(data=ppm_data, name="ttx")
+            img_data = pg.canvas_to_ppm(img_canvas, fmt, aspect=1)
+            img_obj = tk.call("image", "create", "photo", "-data", img_data)
+            # FIXME PhotoImage() generates blank (black) image
+            #img_obj = PhotoImage(data=img_data, name="ttx")
 
         canvas.delete('all')
-        canvas.create_image(0, 0, anchor=NW, image=img_xpm)
-        #canvas.configure(width=img_xpm.width(), height=img_xpm.height())
-        w = tk.call("image", "width", img_xpm)
-        h = tk.call("image", "height", img_xpm)
+        canvas.create_image(0, 0, anchor=NW, image=img_obj)
+        #canvas.configure(width=img_obj.width(), height=img_obj.height())
+        w = tk.call("image", "width", img_obj)
+        h = tk.call("image", "height", img_obj)
         canvas.configure(width=w, height=h)
 
         global pg_disp

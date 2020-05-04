@@ -16,8 +16,12 @@
 #include "Python.h"
 
 #include <libzvbi.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
 
 #include "zvbi_export.h"
+#include "zvbi_page.h"
 
 // ---------------------------------------------------------------------------
 //  Teletext Page Export
@@ -32,26 +36,57 @@ PyObject * ZvbiExportError;
 
 // ---------------------------------------------------------------------------
 
-#if 0
-
-static HV *
+static PyObject *
 zvbi_xs_export_info_to_hv( vbi_export_info * p_info )
 {
-        HV * hv = newHV();
+    PyObject * dict = PyDict_New();
 
-        hv_store_pv(hv, keyword, p_info->keyword);
-        hv_store_pv(hv, label, p_info->label);
-        hv_store_pv(hv, tooltip, p_info->tooltip);
-        hv_store_pv(hv, mime_type, p_info->mime_type);
-        hv_store_pv(hv, extension, p_info->extension);
+    if (dict != NULL) {
+        vbi_bool ok = TRUE;
+        PyObject * obj = PyUnicode_FromString(p_info->keyword);
+        if (obj) {
+            ok = (PyDict_SetItemString(dict, "keyword", obj) == 0);
+        }
+        if (ok) {
+            obj = PyUnicode_FromString(p_info->label);
+            if (obj) {
+                ok = (PyDict_SetItemString(dict, "label", obj) == 0);
+            }
+        }
+        if (ok) {
+            obj = PyUnicode_FromString(p_info->tooltip);
+            if (obj) {
+                ok = (PyDict_SetItemString(dict, "tooltip", obj) == 0);
+            }
+        }
+        if (ok) {
+            obj = PyUnicode_FromString(p_info->mime_type);
+            if (obj) {
+                ok = (PyDict_SetItemString(dict, "mime_type", obj) == 0);
+            }
+        }
+        if (ok) {
+            obj = PyUnicode_FromString(p_info->extension);
+            if (obj) {
+                ok = (PyDict_SetItemString(dict, "extension", obj) == 0);
+            }
+        }
 
-        return hv;
+        if (!ok) {
+            Py_DECREF(dict);
+            dict = NULL;
+        }
+    }
+    return dict;
 }
 
-static HV *
+PyObject *
 zvbi_xs_export_option_info_to_hv( vbi_option_info * p_opt )
 {
-        HV * hv = newHV();
+    PyObject * dict = PyDict_New();
+
+    if (dict != NULL) {
+#if 0
         vbi_bool has_menu;
 
         hv_store_iv(hv, type, p_opt->type);
@@ -131,10 +166,10 @@ zvbi_xs_export_option_info_to_hv( vbi_option_info * p_opt )
                 hv_store_rv(hv, menu, (SV*)av);
         }
 
-        return hv;
-}
-
 #endif // 0
+    }
+    return dict;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -183,223 +218,297 @@ ZvbiExport_init(ZvbiExportObj *self, PyObject *args, PyObject *kwds)
     return RETVAL;
 }
 
-#if 0
-void
-vbi_export_info_enum(index)
-        int index
-        PREINIT:
-        vbi_export_info * p_info;
-        PPCODE:
-        p_info = vbi_export_info_enum(index);
-        if (p_info != NULL) {
-                HV * hv = zvbi_xs_export_info_to_hv(p_info);
-                EXTEND(sp,1);
-                PUSHs (sv_2mortal (newRV_noinc ((SV*)hv)));
-        }
+static PyObject *
+ZvbiExport_info_enum(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    int index = 0;
 
-void
-vbi_export_info_keyword(keyword)
-        const char * keyword
-        PREINIT:
-        vbi_export_info * p_info;
-        PPCODE:
-        p_info = vbi_export_info_keyword(keyword);
+    if (PyArg_ParseTuple(args, "i", &index)) {
+        vbi_export_info * p_info = vbi_export_info_enum(index);
         if (p_info != NULL) {
-                HV * hv = zvbi_xs_export_info_to_hv(p_info);
-                EXTEND(sp,1);
-                PUSHs (sv_2mortal (newRV_noinc ((SV*)hv)));
+            RETVAL = zvbi_xs_export_info_to_hv(p_info);
         }
+    }
+    return RETVAL;
+}
 
-void
-vbi_export_info_export(exp)
-        VbiExportObj * exp
-        PREINIT:
-        vbi_export_info * p_info;
-        PPCODE:
-        p_info = vbi_export_info_export(exp);
+static PyObject *
+ZvbiExport_info_keyword(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    char * keyword = NULL;
+
+    if (PyArg_ParseTuple(args, "s", &keyword)) {
+        vbi_export_info * p_info = vbi_export_info_keyword(keyword);
         if (p_info != NULL) {
-                HV * hv = zvbi_xs_export_info_to_hv(p_info);
-                EXTEND(sp,1);
-                PUSHs (sv_2mortal (newRV_noinc ((SV*)hv)));
+            RETVAL = zvbi_xs_export_info_to_hv(p_info);
         }
+    }
+    return RETVAL;
+}
 
-void
-vbi_export_option_info_enum(exp, index)
-        VbiExportObj * exp
-        int index
-        PREINIT:
-        vbi_option_info * p_opt;
-        PPCODE:
-        p_opt = vbi_export_option_info_enum(exp, index);
+static PyObject *
+ZvbiExport_info_export(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+
+    vbi_export_info * p_info = vbi_export_info_export(self->ctx);
+    if (p_info != NULL) {
+        RETVAL = zvbi_xs_export_info_to_hv(p_info);
+    }
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiExport_option_info_enum(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    int index = 0;
+
+    if (PyArg_ParseTuple(args, "i", &index)) {
+        vbi_option_info * p_opt = vbi_export_option_info_enum(self->ctx, index);
         if (p_opt != NULL) {
-                HV * hv = zvbi_xs_export_option_info_to_hv(p_opt);
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal (newRV_noinc ((SV*)hv)));
+            RETVAL = zvbi_xs_export_option_info_to_hv(p_opt);
         }
+    }
+    return RETVAL;
+}
 
-void
-vbi_export_option_info_keyword(exp, keyword)
-        VbiExportObj * exp
-        const char *keyword
-        PREINIT:
-        vbi_option_info * p_opt;
-        PPCODE:
-        p_opt = vbi_export_option_info_keyword(exp, keyword);
+static PyObject *
+ZvbiExport_option_info_keyword(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    char * keyword = NULL;
+
+    if (PyArg_ParseTuple(args, "s", &keyword)) {
+        vbi_option_info * p_opt = vbi_export_option_info_keyword(self->ctx, keyword);
         if (p_opt != NULL) {
-                HV * hv = zvbi_xs_export_option_info_to_hv(p_opt);
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal (newRV_noinc ((SV*)hv)));
+            RETVAL = zvbi_xs_export_option_info_to_hv(p_opt);
         }
+    }
+    return RETVAL;
+}
 
-vbi_bool
-vbi_export_option_set(exp, keyword, sv)
-        VbiExportObj * exp
-        const char * keyword
-        SV * sv
-        PREINIT:
-        vbi_option_info * p_info;
-        CODE:
-        RETVAL = 0;
-        p_info = vbi_export_option_info_keyword(exp, keyword);
+static PyObject *
+ZvbiExport_option_set(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    char * keyword = NULL;
+    PyObject * obj = NULL;
+
+    if (PyArg_ParseTuple(args, "sO", &keyword, &obj)) {
+        vbi_option_info * p_info = vbi_export_option_info_keyword(self->ctx, keyword);
         if (p_info != NULL) {
-                switch (p_info->type) {
+            vbi_bool export_ok = TRUE;
+
+            switch (p_info->type) {
                 case VBI_OPTION_BOOL:
                 case VBI_OPTION_INT:
                 case VBI_OPTION_MENU:
-                        RETVAL = vbi_export_option_set(exp, keyword, SvIV(sv));
-                        break;
+                {
+                    long val = PyLong_AsLong(obj);
+                    if ((val != -1) || (PyErr_Occurred() == NULL)) {
+                        export_ok = vbi_export_option_set(self->ctx, keyword, val);
+                    }
+                }
                 case VBI_OPTION_REAL:
-                        RETVAL = vbi_export_option_set(exp, keyword, SvNV(sv));
-                        break;
+                {
+                    double val = PyFloat_AsDouble(obj);
+                    if ((val != -1.0) || (PyErr_Occurred() == NULL)) {
+                        export_ok = vbi_export_option_set(self->ctx, keyword, val);
+                    }
+                }
                 case VBI_OPTION_STRING:
-                        RETVAL = vbi_export_option_set(exp, keyword, SvPV_nolen(sv));
-                        break;
+                {
+                    char * val = PyUnicode_AsUTF8(obj);
+                    if (val != NULL) {
+                        export_ok = vbi_export_option_set(self->ctx, keyword, val);
+                    }
+                }
                 default:
+                {
+                    PyErr_Format(ZvbiExportError, "keyword:%s has unsupported type:%d",
+                                 keyword, p_info->type);  // internal error
+                    break;
+                }
+            }
+
+            if (export_ok) {
+                RETVAL = Py_None;
+            }
+            else {
+                PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+            }
+        }
+        else {
+            PyErr_Format(ZvbiExportError, "unsupported keyword: %s", keyword);
+        }
+    }
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiExport_option_get(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    char * keyword = NULL;
+
+    if (PyArg_ParseTuple(args, "s", &keyword)) {
+        vbi_option_value opt_val;
+        vbi_option_info * p_info = vbi_export_option_info_keyword(self->ctx, keyword);
+        if (p_info != NULL) {
+            if (vbi_export_option_get(self->ctx, keyword, &opt_val)) {
+                switch (p_info->type) {
+                    case VBI_OPTION_BOOL:
+                    case VBI_OPTION_INT:
+                    case VBI_OPTION_MENU:
+                        RETVAL = PyLong_FromLong(opt_val.num);
+                        break;
+                    case VBI_OPTION_REAL:
+                        RETVAL = PyFloat_FromDouble(opt_val.dbl);
+                        break;
+                    case VBI_OPTION_STRING:
+                        RETVAL = PyUnicode_FromString(opt_val.str);
+                        free(opt_val.str);
+                        break;
+                    default:
+                        PyErr_Format(ZvbiExportError, "keyword:%s has unsupported type:%d",
+                                     keyword, p_info->type);  // internal error
                         break;
                 }
+            }
+            else {
+                PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+            }
         }
-        OUTPUT:
-        RETVAL
-
-void
-vbi_export_option_get(exp, keyword)
-        VbiExportObj * exp
-        const char * keyword
-        PREINIT:
-        vbi_option_value opt_val;
-        vbi_option_info * p_info;
-        PPCODE:
-        p_info = vbi_export_option_info_keyword(exp, keyword);
-        if (p_info != NULL) {
-                if (vbi_export_option_get(exp, keyword, &opt_val)) {
-                        switch (p_info->type) {
-                        case VBI_OPTION_BOOL:
-                        case VBI_OPTION_INT:
-                        case VBI_OPTION_MENU:
-                                EXTEND(sp, 1);
-                                PUSHs (sv_2mortal (newSViv (opt_val.num)));
-                                break;
-                        case VBI_OPTION_REAL:
-                                EXTEND(sp, 1);
-                                PUSHs (sv_2mortal (newSVnv (opt_val.dbl)));
-                                break;
-                        case VBI_OPTION_STRING:
-                                EXTEND(sp, 1);
-                                PUSHs (sv_2mortal (newSVpv (opt_val.str, 0)));
-                                free(opt_val.str);
-                                break;
-                        default:
-                                break;
-                        }
-                }
+        else {
+            PyErr_Format(ZvbiExportError, "unsupported keyword: %s", keyword);
         }
+    }
+    return RETVAL;
+}
 
-vbi_bool
-vbi_export_option_menu_set(exp, keyword, entry)
-        VbiExportObj * exp
-        const char * keyword
-        int entry
+static PyObject *
+ZvbiExport_option_menu_set(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    char * keyword = NULL;
+    int entry = 0;
 
-void
-vbi_export_option_menu_get(exp, keyword)
-        VbiExportObj * exp
-        const char * keyword
-        PREINIT:
-        int entry;
-        PPCODE:
-        if (vbi_export_option_menu_get(exp, keyword, &entry)) {
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal (newSViv (entry)));
+    if (PyArg_ParseTuple(args, "si", &keyword, &entry)) {
+        if (vbi_export_option_menu_set(self->ctx, keyword, entry)) {
+            RETVAL = Py_None;
         }
-
-vbi_bool
-vbi_export_stdio(exp, fp, pg_obj)
-        VbiExportObj * exp
-        FILE * fp
-        VbiPageObj * pg_obj
-        CODE:
-        RETVAL = vbi_export_stdio(exp, fp, pg_obj->p_pg);
-        OUTPUT:
-        RETVAL
-
-vbi_bool
-vbi_export_file(exp, name, pg_obj)
-        VbiExportObj * exp
-        const char * name
-        VbiPageObj * pg_obj
-        CODE:
-        RETVAL = vbi_export_file(exp, name, pg_obj->p_pg);
-        OUTPUT:
-        RETVAL
-
-int
-vbi_export_mem(exp, sv_buf, pg_obj)
-        VbiExportObj * exp
-        SV * sv_buf
-        VbiPageObj * pg_obj
-        PREINIT:
-        char * p_buf;
-        STRLEN buf_size;
-        CODE:
-        if (SvOK(sv_buf))  {
-                p_buf = SvPV_force(sv_buf, buf_size);
-                RETVAL = zvbi_(export_mem)(exp, p_buf, buf_size + 1, pg_obj->p_pg);
-        } else {
-                croak("Input buffer is undefined or not a scalar");
-                RETVAL = FALSE;
+        else {
+            PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
         }
-        OUTPUT:
-        sv_buf
-        RETVAL
+    }
+    return RETVAL;
+}
 
-void
-vbi_export_alloc(exp, pg_obj)
-        VbiExportObj * exp
-        VbiPageObj * pg_obj
-        PREINIT:
+static PyObject *
+ZvbiExport_option_menu_get(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    char * keyword = NULL;
+
+    if (PyArg_ParseTuple(args, "s", &keyword)) {
+        int entry = 0;
+        if (vbi_export_option_menu_get(self->ctx, keyword, &entry)) {
+            RETVAL = PyLong_FromLong(entry);
+        }
+        else {
+            PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+        }
+    }
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiExport_to_stdio(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    PyObject * pg_obj = NULL;
+    int fd;
+
+    if (PyArg_ParseTuple(args, "O!i", &ZvbiPageTypeDef, &pg_obj, &fd)) {
+        FILE * fp = fdopen(fd, "w");
+        if (fp != NULL) {
+            vbi_page * page = ZvbiPage_GetPageBuf(pg_obj);
+            if (vbi_export_stdio(self->ctx, fp, page)) {
+                RETVAL = Py_None;
+            }
+            else {
+                PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+            }
+        }
+        else {
+            PyErr_Format(ZvbiExportError, "failed to initialize stream: %s", strerror(errno));
+        }
+    }
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiExport_to_file(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    PyObject * pg_obj = NULL;
+    char * file_name = NULL;
+
+    if (PyArg_ParseTuple(args, "O!s", &ZvbiPageTypeDef, &pg_obj, &file_name)) {
+        vbi_page * page = ZvbiPage_GetPageBuf(pg_obj);
+        if (vbi_export_file(self->ctx, file_name, page)) {
+            RETVAL = Py_None;
+        }
+        else {
+            PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+        }
+    }
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiExport_to_memory(ZvbiExportObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    PyObject * pg_obj = NULL;
+
+    if (PyArg_ParseTuple(args, "O!", &ZvbiPageTypeDef, &pg_obj)) {
+        vbi_page * page = ZvbiPage_GetPageBuf(pg_obj);
         char * p_buf;
         size_t buf_size;
-        SV * sv;
-        PPCODE:
-        if (zvbi_(export_alloc)(exp, (void**)&p_buf, &buf_size, pg_obj->p_pg)) {
-                sv = newSV(0);
-                sv_usepvn(sv, p_buf, buf_size);
-                /* now the pointer is managed by perl -> no free() */
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal (sv));
+        if (vbi_export_alloc(self->ctx, (void**)&p_buf, &buf_size, page)) {
+            RETVAL = PyBytes_FromStringAndSize(p_buf, buf_size);;
+            free(p_buf);
         }
-
-char *
-vbi_export_errstr(exp)
-        VbiExportObj * exp
-
-#endif // 0
+        else {
+            PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+        }
+    }
+    return RETVAL;
+}
 
 // ---------------------------------------------------------------------------
 
 static PyMethodDef ZvbiExport_MethodsDef[] =
 {
-    //{"decode",           (PyCFunction) ZvbiExport_decode,           METH_VARARGS, NULL },
+    {"info_enum",           (PyCFunction) ZvbiExport_info_enum,           METH_NOARGS | METH_STATIC, NULL },
+    {"info_keyword",        (PyCFunction) ZvbiExport_info_keyword,        METH_NOARGS | METH_STATIC, NULL },
+
+    {"info_export",         (PyCFunction) ZvbiExport_info_export,         METH_VARARGS, NULL },
+    {"option_info_enum",    (PyCFunction) ZvbiExport_option_info_enum,    METH_VARARGS, NULL },
+    {"option_info_keyword", (PyCFunction) ZvbiExport_option_info_keyword, METH_VARARGS, NULL },
+
+    {"option_set",          (PyCFunction) ZvbiExport_option_set,          METH_VARARGS, NULL },
+    {"option_get",          (PyCFunction) ZvbiExport_option_get,          METH_VARARGS, NULL },
+    {"option_menu_set",     (PyCFunction) ZvbiExport_option_menu_set,     METH_VARARGS, NULL },
+    {"option_menu_get",     (PyCFunction) ZvbiExport_option_menu_get,     METH_VARARGS, NULL },
+
+    {"to_stdio",            (PyCFunction) ZvbiExport_to_stdio,            METH_VARARGS, NULL },
+    {"to_file",             (PyCFunction) ZvbiExport_to_file,             METH_VARARGS, NULL },
+    {"to_memory",           (PyCFunction) ZvbiExport_to_memory,           METH_VARARGS, NULL },
 
     {NULL}  /* Sentinel */
 };
