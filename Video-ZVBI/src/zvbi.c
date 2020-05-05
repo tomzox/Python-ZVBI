@@ -40,6 +40,8 @@
 #error "Minimum version for libzvbi is 0.2." #ZVBI_XS_MIN_MICRO
 #endif
 
+PyObject * ZvbiError;
+
 /*
  * Basic types
  */
@@ -1160,6 +1162,7 @@ vbi_xds_demux_feed_frame(xd, sv_sliced, n_lines)
         }
         OUTPUT:
         RETVAL
+#endif // 0
 
 // ---------------------------------------------------------------------------
 //  Parity and Hamming decoding and encoding
@@ -1167,125 +1170,188 @@ vbi_xds_demux_feed_frame(xd, sv_sliced, n_lines)
 
 //MODULE = Video::ZVBI  PACKAGE = Video::ZVBI   PREFIX = vbi_
 
-unsigned int
-vbi_par8(val)
-        unsigned int val
-
-int
-vbi_unpar8(val)
-        unsigned int val
-
-void
-par_str(data)
-        SV * data
-        PREINIT:
-        uint8_t *p;
-        STRLEN len;
-        CODE:
-        p = (uint8_t *)SvPV (data, len);
-        vbi_par(p, len);
-        OUTPUT:
-        data
-#endif // 0
-
-//
-// Note this function actually does not use libzvbi "unpar()" internally,
-// as that function modifies the string in place which does not work with
-// python "bytes" and "string" types being immutable; So we use the macro
-// unpar8() instead and combine decoding with conversion to Unicode.
-//
 static PyObject *
-Zvbi_unpar_str(PyObject *self, PyObject *args)
+Zvbi_par8(PyObject *self, PyObject *args)
 {
-    PyObject * obj = NULL;
     PyObject * RETVAL = NULL;
+    unsigned val;
 
-    if (PyArg_ParseTuple(args, "O!", &PyBytes_Type, &obj))
-    {
-        char * in_buf;
-        Py_ssize_t in_len;
-        if (PyBytes_AsStringAndSize(obj, &in_buf, &in_len) == 0) {
-            RETVAL = PyUnicode_New(in_len, 0x7f);
-            if (RETVAL != NULL) {
-                int kind = PyUnicode_KIND(RETVAL);
-                void * out_buf = PyUnicode_DATA(RETVAL);
-                for (int idx = 0; idx < in_len; ++idx) {
-                    int c = vbi_unpar8(in_buf[idx]);
-                    PyUnicode_WRITE(kind, out_buf, idx, ((c >= 0) ? c : ' '));
-                }
-            }
-        }
+    if (PyArg_ParseTuple(args, "I", &val)) {
+        unsigned result = vbi_par8(val);
+        RETVAL = PyLong_FromLong(result);
     }
     return RETVAL;
 }
 
-#if 0
+static PyObject *
+Zvbi_unpar8(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    unsigned val;
 
-unsigned int
-vbi_rev8(val)
-        unsigned int val
+    if (PyArg_ParseTuple(args, "I", &val)) {
+        int result = vbi_unpar8(val);  // -1 on error
+        RETVAL = PyLong_FromLong(result);
+    }
+    return RETVAL;
+}
 
-unsigned int
-vbi_rev16(val)
-        unsigned int val
+static PyObject *
+Zvbi_par_str(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    Py_buffer in_buf;
 
-unsigned int
-rev16p(data, offset=0)
-        SV *    data
-        int     offset
-        PREINIT:
-        uint8_t *p;
-        STRLEN len;
-        CODE:
-        p = (uint8_t *)SvPV (data, len);
-        if (len < offset + 2) {
-                croak ("rev16p: input data length must greater than offset by at least 2");
+    if (PyArg_ParseTuple(args, "s*", &in_buf)) {
+        RETVAL = PyBytes_FromStringAndSize(in_buf.buf, in_buf.len);
+        if (RETVAL) {
+            char * out_buf = PyBytes_AsString(RETVAL);
+            vbi_par((uint8_t*)out_buf, in_buf.len);
         }
-        RETVAL = vbi_rev16p(p + offset);
-        OUTPUT:
-        RETVAL
+        PyBuffer_Release(&in_buf);
+    }
+    return RETVAL;
+}
 
-unsigned int
-vbi_ham8(val)
-        unsigned int val
+static PyObject *
+Zvbi_unpar_str(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    Py_buffer in_buf;
+    int repl_char = -1;
 
-int
-vbi_unham8(val)
-        unsigned int val
-
-int
-unham16p(data, offset=0)
-        SV *    data
-        int     offset
-        PREINIT:
-        unsigned char *p;
-        STRLEN len;
-        CODE:
-        p = (unsigned char *)SvPV (data, len);
-        if (len < offset + 2) {
-                croak ("unham16p: input data length must greater than offset by at least 2");
+    if (PyArg_ParseTuple(args, "y*|C", &in_buf, &repl_char)) {
+        RETVAL = PyBytes_FromStringAndSize(in_buf.buf, in_buf.len);
+        if (RETVAL) {
+            char * out_buf = PyBytes_AsString(RETVAL);
+            vbi_unpar((uint8_t*)out_buf, in_buf.len);
+            if (repl_char >= 0) {
+                char * p = out_buf;
+                for (int idx = 0; idx < in_buf.len; ++idx, ++p) {
+                    if (*p < 0) {
+                        *p = repl_char;
+                    }
+                }
+            }
         }
-        RETVAL = vbi_unham16p(p + offset);
-        OUTPUT:
-        RETVAL
+        PyBuffer_Release(&in_buf);
+    }
+    return RETVAL;
+}
 
-int
-unham24p(data, offset=0)
-        SV *    data
-        int     offset
-        PREINIT:
-        unsigned char *p;
-        STRLEN len;
-        CODE:
-        p = (unsigned char *)SvPV (data, len);
-        if (len < offset + 3) {
-                croak ("unham24p: input data length must greater than offset by at least 3");
+static PyObject *
+Zvbi_rev8(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    unsigned val;
+
+    if (PyArg_ParseTuple(args, "I", &val)) {
+        unsigned result = vbi_rev8(val);
+        RETVAL = PyLong_FromLong(result);
+    }
+    return RETVAL;
+}
+
+static PyObject *
+Zvbi_rev16(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    unsigned val;
+
+    if (PyArg_ParseTuple(args, "I", &val)) {
+        unsigned result = vbi_rev16(val);
+        RETVAL = PyLong_FromLong(result);
+    }
+    return RETVAL;
+}
+
+static PyObject *
+Zvbi_rev16p(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    Py_buffer in_buf;
+    unsigned offset = 0;
+
+    if (PyArg_ParseTuple(args, "y*|I", &in_buf, offset)) {
+        if (offset + 2 <= in_buf.len) {
+            unsigned result = vbi_rev16p((uint8_t*)in_buf.buf + offset);
+            RETVAL = PyLong_FromLong(result);
         }
-        RETVAL = vbi_unham24p(p + offset);
-        OUTPUT:
-        RETVAL
+        else {
+            PyErr_SetString(ZvbiError, "rev16p: input data length must greater than offset by at least 2");
+        }
+        PyBuffer_Release(&in_buf);
+    }
+    return RETVAL;
+}
 
-#endif
+
+static PyObject *
+Zvbi_ham8(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    unsigned val;
+
+    if (PyArg_ParseTuple(args, "I", &val)) {
+        unsigned result = vbi_ham8(val);
+        RETVAL = PyLong_FromLong(result);
+    }
+    return RETVAL;
+}
+
+static PyObject *
+Zvbi_unham8(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    unsigned val;
+
+    if (PyArg_ParseTuple(args, "I", &val)) {
+        int result = vbi_unham8(val);  // may be -1
+        RETVAL = PyLong_FromLong(result);
+    }
+    return RETVAL;
+}
+
+static PyObject *
+Zvbi_unham16p(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    Py_buffer in_buf;
+    unsigned offset = 0;
+
+    if (PyArg_ParseTuple(args, "y*|I", &in_buf, offset)) {
+        if (offset + 2 <= in_buf.len) {
+            int result = vbi_unham16p((uint8_t*)in_buf.buf + offset);
+            RETVAL = PyLong_FromLong(result);
+        }
+        else {
+            PyErr_SetString(ZvbiError, "unham16p: input data length must greater than offset by at least 2");
+        }
+        PyBuffer_Release(&in_buf);
+    }
+    return RETVAL;
+}
+
+static PyObject *
+Zvbi_unham24p(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    Py_buffer in_buf;
+    unsigned offset = 0;
+
+    if (PyArg_ParseTuple(args, "y*|I", &in_buf, offset)) {
+        if (offset + 3 <= in_buf.len) {
+            int result = vbi_unham24p((uint8_t*)in_buf.buf + offset);
+            RETVAL = PyLong_FromLong(result);
+        }
+        else {
+            PyErr_SetString(ZvbiError, "unham24p: input data length must greater than offset by at least 3");
+        }
+        PyBuffer_Release(&in_buf);
+    }
+    return RETVAL;
+}
+
 
 // ---------------------------------------------------------------------------
 //  BCD arithmetic
@@ -1414,35 +1480,53 @@ set_log_on_stderr(mask)
         CODE:
         zvbi_xs_free_callback_by_obj(MY_CXT.log, NULL);
         zvbi_(set_log_fn)(mask, zvbi_(log_on_stderr), NULL);
+#endif
 
-void
-decode_vps_cni(data)
-        SV * data
-        PREINIT:
+static PyObject *
+Zvbi_decode_vps_cni(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    PyObject * in_obj = NULL;
+
+    if (PyArg_ParseTuple(args, "O!", &PyBytes_Type, &in_obj)) {
         unsigned int cni;
-        unsigned char *p;
-        STRLEN len;
-        PPCODE:
-        p = (unsigned char *)SvPV (data, len);
-        if (len >= 13) {
-                if (zvbi_(decode_vps_cni)(&cni, p)) {
-                        EXTEND(sp,1);
-                        PUSHs (sv_2mortal (newSVuv (cni)));
-                }
-        } else {
-                croak ("decode_vps_cni: input buffer must have at least 13 bytes");
-        }
+        char * p_data = NULL;
+        Py_ssize_t buf_size = 0;
 
-void
-encode_vps_cni(cni)
-        unsigned int cni
-        PREINIT:
-        uint8_t buffer[13];
-        PPCODE:
-        if (zvbi_(encode_vps_cni)(buffer, cni)) {
-                EXTEND(sp,1);
-                PUSHs (sv_2mortal (newSVpvn ((char*)buffer, 13)));
+        if (PyBytes_AsStringAndSize(in_obj, &p_data, &buf_size) == 0) {
+            if (buf_size >= 13) {
+                vbi_decode_vps_cni(&cni, (uint8_t*)p_data);
+                RETVAL = PyLong_FromLong(cni);
+            }
+            else {
+                PyErr_SetString(ZvbiError, "decode_vps_cni: input buffer must have at least 13 bytes");
+            }
         }
+    }
+    return RETVAL;
+}
+
+static PyObject *
+Zvbi_encode_vps_cni(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    unsigned cni;
+
+    if (PyArg_ParseTuple(args, "I", &cni)) {
+        RETVAL = PyBytes_FromStringAndSize(NULL, 13);  // alloc uninitialized buffer
+        char * p_buf = PyBytes_AsString(RETVAL);
+        memset(p_buf, 0, 13);
+
+        if (vbi_encode_vps_cni((uint8_t*)p_buf, cni) == FALSE) {
+            PyErr_SetString(ZvbiError, "encode_vps_cni: invalid CNI");
+            Py_DECREF(RETVAL);
+            RETVAL = NULL;
+        }
+    }
+    return RETVAL;
+}
+
+#if 0
 
 void
 rating_string(auth, id)
@@ -1516,7 +1600,17 @@ caption_unicode(c, to_upper=0)
 
 static PyMethodDef Zvbi_Methods[] =
 {
+    {"par8",              Zvbi_par8,              METH_VARARGS, NULL},
+    {"unpar8",            Zvbi_unpar8,            METH_VARARGS, NULL},
+    {"par_str",           Zvbi_par_str,           METH_VARARGS, NULL},
     {"unpar_str",         Zvbi_unpar_str,         METH_VARARGS, PyDoc_STR("Decode parity and convert to string")},
+    {"rev8",              Zvbi_rev8,              METH_VARARGS, NULL},
+    {"rev16",             Zvbi_rev16,             METH_VARARGS, NULL},
+    {"rev16p",            Zvbi_rev16p,            METH_VARARGS, NULL},
+    {"ham8",              Zvbi_ham8,              METH_VARARGS, NULL},
+    {"unham8",            Zvbi_unham8,            METH_VARARGS, NULL},
+    {"unham16p",          Zvbi_unham16p,          METH_VARARGS, NULL},
+    {"unham24p",          Zvbi_unham24p,          METH_VARARGS, NULL},
 
     {"dec2bcd",           Zvbi_dec2bcd,           METH_VARARGS, NULL},
     {"bcd2dec",           Zvbi_bcd2dec,           METH_VARARGS, NULL},
@@ -1525,6 +1619,9 @@ static PyMethodDef Zvbi_Methods[] =
 
     {"lib_version",       Zvbi_lib_version,       METH_NOARGS,  PyDoc_STR("Return tuple with library version")},
     {"check_lib_version", Zvbi_check_lib_version, METH_VARARGS, PyDoc_STR("Check if library version is equal or newer than the given")},
+
+    {"decode_vps_cni",    Zvbi_decode_vps_cni,    METH_VARARGS, NULL},
+    {"encode_vps_cni",    Zvbi_encode_vps_cni,    METH_VARARGS, NULL},
 
     {NULL}       // sentinel
 };
@@ -1537,8 +1634,6 @@ static struct PyModuleDef Zvbi_module =
     .m_size = -1,
     .m_methods = Zvbi_Methods
 };
-
-PyObject * ZvbiError;
 
 PyMODINIT_FUNC
 PyInit_Zvbi(void)

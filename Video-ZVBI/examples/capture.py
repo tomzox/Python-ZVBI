@@ -179,10 +179,9 @@ def decode_sliced(cap_data):
 
             print(" ", end='')
 
-            astr = re.sub(r'[\x00-\x1F\x7F]', '.', Zvbi.unpar_str(data))
-            print(astr, end='')
-
-            print("\n", end='')
+            astr = Zvbi.unpar_str(data, '.')
+            astr = re.sub(r'[\x00-\x1F\x7F]', '.', astr.decode('ISO-8859-1'))
+            print(astr)
 
     for data, slc_id, line in cap_data.sliced_buffer:
         if slc_id == 0:
