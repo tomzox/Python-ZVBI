@@ -35,6 +35,13 @@ PyObject * ZvbiServiceDecError;
 
 // ---------------------------------------------------------------------------
 
+vbi_decoder *
+ZvbiServiceDec_GetBuf(PyObject * self)
+{
+    assert(PyObject_IsInstance(self, (PyObject*)&ZvbiServiceDecTypeDef) == 1);
+    return ((ZvbiServiceDecObj*) self)->ctx;
+}
+
 static PyObject *
 ZvbiServiceDec_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
@@ -453,14 +460,14 @@ zvbi_xs_vt_event_handler( vbi_event * event, void * user_data )
     {
         PyObject * dict = ZvbiServiceDec_Event2Dict(event);
 
-        /* invoke the Python subroutine */
+        // invoke the Python subroutine
         if (ZvbiCallbacks.event[cb_idx].p_data != NULL) {
             PyObject_CallFunction(cb_obj, "iOO", event->type, dict, ZvbiCallbacks.event[cb_idx].p_data);
         }
         else {
             PyObject_CallFunction(cb_obj, "iO", event->type, dict);
         }
-        // TODO DECREF on parameters?
+        Py_DECREF(dict);
 
         // clear exceptions as we cannot handle them here
         if (PyErr_Occurred() != NULL) {
@@ -538,7 +545,7 @@ static PyMethodDef ZvbiServiceDec_MethodsDef[] =
     {NULL}  /* Sentinel */
 };
 
-static PyTypeObject ZvbiServiceDecTypeDef =
+PyTypeObject ZvbiServiceDecTypeDef =
 {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "Zvbi.ServiceDec",

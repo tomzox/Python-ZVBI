@@ -19,6 +19,7 @@
 
 #include "zvbi_search.h"
 #include "zvbi_callbacks.h"
+#include "zvbi_service_dec.h"
 #include "zvbi_page.h"
 
 // ---------------------------------------------------------------------------
@@ -34,7 +35,6 @@ PyObject * ZvbiSearchError;
 
 // ---------------------------------------------------------------------------
 
-#if 0
 /*
  * Invoke callback for the search in the teletext cache
  * Callback can return FALSE to abort the search.
@@ -42,48 +42,30 @@ PyObject * ZvbiSearchError;
 static int
 zvbi_xs_search_progress( vbi_page * p_pg, unsigned cb_idx )
 {
-        dMY_CXT;
-        SV * perl_cb;
-        SV * sv;
-        VbiPageObj * pg_obj;
+    PyObject * cb_obj;
+    int result = FALSE;
 
-        I32  count;
-        int  result = TRUE;
+    if ( (cb_idx < ZVBI_MAX_CB_COUNT) &&
+         ((cb_obj = ZvbiCallbacks.search[cb_idx].p_cb) != NULL) )
+    {
+        PyObject * pg_obj = ZvbiPage_New(p_pg, FALSE);
+        PyObject * user_data = ZvbiCallbacks.search[cb_idx].p_data;
 
-        if ( (cb_idx < ZVBI_MAX_CB_COUNT) &&
-             ((perl_cb = ZvbiCallbacks.search[cb_idx].p_cb) != NULL) ) {
-                dSP ;
-                ENTER ;
-                SAVETMPS ;
+        // invoke the Python subroutine
+        PyObject * cb_rslt = PyObject_CallFunctionObjArgs(cb_obj, pg_obj, user_data, NULL);
 
-                Newxz(pg_obj, 1, VbiPageObj);
-                pg_obj->do_free_pg = FALSE;
-                pg_obj->p_pg = p_pg;
-
-                sv = newSV(0);
-                sv_setref_pv(sv, "Video::ZVBI::page", (void*)pg_obj);
-
-                /* push the function parameters on the Perl interpreter stack */
-                PUSHMARK(SP) ;
-                XPUSHs(sv_2mortal (sv));
-                if (ZvbiCallbacks.search[cb_idx].p_data != NULL) {
-                        XPUSHs(ZvbiCallbacks.search[cb_idx].p_data);
-                }
-                PUTBACK ;
-
-                /* invoke the Perl subroutine */
-                count = call_sv(perl_cb, G_SCALAR) ;
-
-                SPAGAIN ;
-
-                if (count == 1) {
-                        result = POPi;
-                }
-
-                FREETMPS ;
-                LEAVE ;
+        // evaluate the result returned by the function
+        if (cb_rslt) {
+            result = (PyObject_IsTrue(cb_rslt) == 1);
         }
-        return result;
+        Py_DECREF(pg_obj);
+
+        // clear exceptions as we cannot handle them here
+        if (PyErr_Occurred() != NULL) {
+            PyErr_Print();
+        }
+    }
+    return result;
 }
 
 /*
@@ -103,22 +85,20 @@ static int zvbi_xs_search_progress_9( vbi_page * p_pg ) { return zvbi_xs_search_
 
 static int (* const zvbi_xs_search_cb_list[ZVBI_MAX_CB_COUNT])( vbi_page * pg ) =
 {
-        zvbi_xs_search_progress_0,
-        zvbi_xs_search_progress_1,
-        zvbi_xs_search_progress_2,
-        zvbi_xs_search_progress_3,
-        zvbi_xs_search_progress_4,
-        zvbi_xs_search_progress_5,
-        zvbi_xs_search_progress_6,
-        zvbi_xs_search_progress_7,
-        zvbi_xs_search_progress_8,
-        zvbi_xs_search_progress_9,
+    zvbi_xs_search_progress_0,
+    zvbi_xs_search_progress_1,
+    zvbi_xs_search_progress_2,
+    zvbi_xs_search_progress_3,
+    zvbi_xs_search_progress_4,
+    zvbi_xs_search_progress_5,
+    zvbi_xs_search_progress_6,
+    zvbi_xs_search_progress_7,
+    zvbi_xs_search_progress_8,
+    zvbi_xs_search_progress_9,
 };
 #if (ZVBI_MAX_CB_COUNT) != 10
 #error "Search progress callback function list length mismatch"
 #endif
-
-#endif  // 0
 
 // ---------------------------------------------------------------------------
 
@@ -143,16 +123,17 @@ static int
 ZvbiSearch_init(ZvbiSearchObj *self, PyObject *args, PyObject *kwds)
 {
     int RETVAL = -1;
-#if 0
-    static char * kwlist[] = {NULL};
-    vbi_decoder * vbi
-    vbi_pgno pgno
-    vbi_subno subno
-    SV * sv_pattern
-    vbi_bool casefold
-    vbi_bool regexp
-    CV * progress
-    SV * user_data
+    static char * kwlist[] = {"decoder", "pattern", "page", "subno",
+                              "casefold", "regexp",
+                              "progress", "userdata", NULL};
+    PyObject * dec_obj = NULL;
+    PyObject * pattern_obj = NULL;
+    int pgno = 0x100;
+    int subno = VBI_ANY_SUBNO;
+    int casefold = FALSE;
+    int regexp = FALSE;
+    PyObject * progress = NULL;
+    PyObject * user_data = NULL;
 
     // reset state in case the module is already initialized
     if (self->ctx) {
@@ -160,61 +141,61 @@ ZvbiSearch_init(ZvbiSearchObj *self, PyObject *args, PyObject *kwds)
         self->ctx = NULL;
     }
 
-    if (PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) {
-        uint16_t * p_ucs;
-        uint16_t * p;
-        char * p_utf;
-        const char * p_utf_end;
-        STRLEN len;
-        int rest;
-        unsigned cb_idx;
+    if (PyArg_ParseTupleAndKeywords(args, kwds, "O!U|ii$ppOO", kwlist,
+                                    &ZvbiServiceDecTypeDef, &dec_obj, &pattern_obj,
+                                    &pgno, &subno, &casefold, &regexp,
+                                    &progress, &user_data)) {
+        // ensure "canonical representation" of Unicode object, needed for READ macro
+        if (PyUnicode_READY(pattern_obj) == 0) {
+            void * ucs4_buf = PyUnicode_DATA(pattern_obj);
+            Py_ssize_t ucs4_len = PyUnicode_GET_LENGTH(pattern_obj); // in code points (not bytes)
+            int ucs4_kind = PyUnicode_KIND(pattern_obj);
+            uint16_t * ucs2 = (uint16_t*) PyMem_RawMalloc((ucs4_len + 1) * 2);
+            uint16_t * p = ucs2;
 
-        /* convert pattern string from Perl's utf8 into UCS-2 */
-        p_utf = SvPVutf8_force(sv_pattern, len);
-        p_utf_end = p_utf + len;
-        Newx(p_ucs, len * 2 + 2, uint16_t);
-        p = p_ucs;
-        rest = len;
-        while (rest > 0) {
-            *(p++) = utf8_to_uvchr_buf((U8*)p_utf, p_utf_end, &len);
-            if (len > 0) {
-                p_utf += len;
-                rest -= len;
+            /* convert pattern string from Perl's utf8 into UCS-2 */
+            for (Py_ssize_t idx = 0; idx < ucs4_len; ++idx) {
+                Py_UCS4 c = PyUnicode_READ(ucs4_kind, ucs4_buf, idx);
+                if (c < 0x10000) {
+                    *(p++) = (uint16_t) c;
+                }
+                else {
+                    *(p++) = 0x20;
+                }
             }
-            else {
-                break;
-            }
-        }
-        *p = 0;
-        if (progress == NULL) {
-            self->ctx = vbi_search_new(self->ctx, pgno, subno, p_ucs, casefold, regexp, NULL);
-        }
-        else {
-            cb_idx = ZvbiCallbacks_alloc(ZvbiCallbacks.search, (SV*)progress, user_data, NULL);
-            if (cb_idx < ZVBI_MAX_CB_COUNT) {
-                self->ctx = vbi_search_new(self->ctx, pgno, subno, p_ucs, casefold, regexp,
-                                           zvbi_xs_search_cb_list[cb_idx]);
+            *p = 0;
+            vbi_decoder * dec = ZvbiServiceDec_GetBuf(dec_obj);
 
-                if (RETVAL != NULL) {
-                        ZvbiCallbacks.search[cb_idx].p_obj = RETVAL;
-                } else {
-                        ZvbiCallbacks_free_by_idx(ZvbiCallbacks.search, cb_idx);
+            if (progress == NULL) {
+                self->ctx = vbi_search_new(dec, pgno, subno, ucs2, casefold, regexp, NULL);
+                if (self->ctx != NULL) {
+                    RETVAL = 0;
+                }
+                else {
+                    PyErr_SetString(ZvbiSearchError, "failed to create search object");
                 }
             }
             else {
-                PyErr_SetString(ZvbiSearchError, "Max. search callback count exceeded");
-            }
-        }
-        Safefree(p_ucs);
+                unsigned cb_idx = ZvbiCallbacks_alloc(ZvbiCallbacks.search, progress, user_data, self);
+                if (cb_idx < ZVBI_MAX_CB_COUNT) {
+                    self->ctx = vbi_search_new(dec, pgno, subno, ucs2, casefold, regexp,
+                                               zvbi_xs_search_cb_list[cb_idx]);
 
-        if (self->ctx != NULL) {
-            RETVAL = 0;
-        }
-        else {
-            PyErr_SetString(ZvbiSearchError, "failed to create search object");
+                    if (self->ctx != NULL) {
+                        RETVAL = 0;
+                    }
+                    else {
+                        PyErr_SetString(ZvbiSearchError, "failed to create search object");
+                        ZvbiCallbacks_free_by_idx(ZvbiCallbacks.search, cb_idx);
+                    }
+                }
+                else {
+                    PyErr_SetString(ZvbiSearchError, "Max. search callback count exceeded");
+                }
+            }
+            PyMem_RawFree(ucs2);
         }
     }
-#endif
     return RETVAL;
 }
 
@@ -231,6 +212,9 @@ ZvbiSearch_next(ZvbiSearchObj *self, PyObject *args)
         if ((st == VBI_SEARCH_SUCCESS) && (page != NULL)) {
             RETVAL = ZvbiPage_New(page, FALSE);
         }
+        else if ((st == VBI_SEARCH_NOT_FOUND) || (st == VBI_SEARCH_CANCELED)) {
+            PyErr_SetString(PyExc_StopIteration, "no page found");
+        }
         else {
             const char * str;
             switch (st)
@@ -238,9 +222,9 @@ ZvbiSearch_next(ZvbiSearchObj *self, PyObject *args)
                 default:
                 case VBI_SEARCH_ERROR:       str = "error during search"; break;
                 case VBI_SEARCH_CACHE_EMPTY: str = "cache empty"; break;
-                case VBI_SEARCH_CANCELED:    str = "cancelled"; break;
-                case VBI_SEARCH_NOT_FOUND:   str = "no page found"; break;
-                case VBI_SEARCH_SUCCESS:     str = "success"; break;
+                case VBI_SEARCH_CANCELED:    str = "cancelled"; break;  // never reached
+                case VBI_SEARCH_NOT_FOUND:   str = "no page found"; break;  // never reached
+                case VBI_SEARCH_SUCCESS:     str = "success"; break;  // never reached
             }
             PyErr_SetString(ZvbiSearchError, str);
         }
@@ -249,6 +233,8 @@ ZvbiSearch_next(ZvbiSearchObj *self, PyObject *args)
 }
 
 // ---------------------------------------------------------------------------
+
+// TODO iterator instead of "next" method
 
 static PyMethodDef ZvbiSearch_MethodsDef[] =
 {
@@ -272,8 +258,6 @@ static PyTypeObject ZvbiSearchTypeDef =
     .tp_methods = ZvbiSearch_MethodsDef,
     //.tp_members = ZvbiSearch_Members,
 };
-
-// TODO iterator
 
 int PyInit_Search(PyObject * module, PyObject * error_base)
 {

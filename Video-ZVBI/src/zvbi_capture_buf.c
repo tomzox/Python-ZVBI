@@ -137,9 +137,10 @@ PyTypeObject ZvbiCaptureSlicedBufTypeDef =
 
 // ---------------------------------------------------------------------------
 
-vbi_capture_buffer * ZvbiCaptureBuf_GetBuf(PyObject * obj)
+vbi_capture_buffer * ZvbiCaptureBuf_GetBuf(PyObject * self)
 {
-    return ((ZvbiCaptureBufObj*)obj)->buf;
+    assert(PyObject_IsInstance(self, (PyObject*)&ZvbiCaptureBufTypeDef) == 1);
+    return ((ZvbiCaptureBufObj*)self)->buf;
 }
 
 PyObject * ZvbiCaptureRawBuf_FromPtr(vbi_capture_buffer * ptr)

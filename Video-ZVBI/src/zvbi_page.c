@@ -369,6 +369,7 @@ zvbi_xs_convert_pal8_to_xpm( ZvbiPageObj * self, const uint8_t * p_img,
 vbi_page *
 ZvbiPage_GetPageBuf(PyObject * self)
 {
+    assert(PyObject_IsInstance(self, (PyObject*)&ZvbiPageTypeDef) == 1);
     return ((ZvbiPageObj*) self)->page;
 }
 
@@ -392,7 +393,7 @@ ZvbiPage_dealloc(ZvbiPageObj *self)
     Py_TYPE(self)->tp_free((PyObject *) self);
 }
 
-#if 0
+#if 0  /* obsolete simplified interface, equivalent to below with default options */
 static PyObject *
 ZvbiPage_draw_vt_page(ZvbiPageObj *self, PyObject *args, PyObject *kwds)
 {
@@ -819,6 +820,7 @@ ZvbiPage_get_page_text(ZvbiPageObj *self, PyObject *args)
     int all_chars = FALSE;
     PyObject * RETVAL = NULL;
 
+    // TODO option for replacement char (default is space char)
     if (PyArg_ParseTuple(args, "|p", &all_chars)) {
         unsigned size = self->page->rows * self->page->columns;
         RETVAL = PyUnicode_New(size, 65535);  // source is UCS-2

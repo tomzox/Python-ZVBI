@@ -14,6 +14,9 @@
 #if !defined (_PY_ZVBI_SRV_DEC_H)
 #define _PY_ZVBI_SRV_DEC_H
 
+extern PyTypeObject ZvbiServiceDecTypeDef;
+vbi_decoder * ZvbiServiceDec_GetBuf(PyObject * obj);
+
 int PyInit_ServiceDec(PyObject * module, PyObject * error_base);
 
 #endif  /* _PY_ZVBI_SRV_DEC_H */
