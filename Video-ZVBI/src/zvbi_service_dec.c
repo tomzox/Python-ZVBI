@@ -105,6 +105,7 @@ ZvbiServiceDec_decode(ZvbiServiceDecObj *self, PyObject *args)
             int n_lines = sliced_buffer->size / sizeof(vbi_sliced);
 
             vbi_decode(self->ctx, p_sliced, n_lines, sliced_buffer->timestamp);
+            Py_INCREF(Py_None);
             RETVAL = Py_None;
         }
         else {
@@ -122,6 +123,7 @@ ZvbiServiceDec_channel_switched(ZvbiServiceDecObj *self, PyObject *args)
 
     if (PyArg_ParseTuple(args, "|I", &nuid)) {
         vbi_channel_switched(self->ctx, nuid);
+        Py_INCREF(Py_None);
         RETVAL = Py_None;
     }
     return RETVAL;
@@ -147,6 +149,7 @@ ZvbiServiceDec_classify_page(ZvbiServiceDecObj *self, PyObject *args)
                 PyTuple_SetItem(RETVAL, 2, PyUnicode_DecodeLatin1(language, strlen(language), NULL));
             }
             else {
+                Py_INCREF(Py_None);
                 PyTuple_SetItem(RETVAL, 2, Py_None);
             }
         }
@@ -162,6 +165,7 @@ ZvbiServiceDec_set_brightness(ZvbiServiceDecObj *self, PyObject *args)
 
     if (PyArg_ParseTuple(args, "i", &brightness)) {
         vbi_set_brightness(self->ctx, brightness);
+        Py_INCREF(Py_None);
         RETVAL = Py_None;
     }
     return RETVAL;
@@ -175,6 +179,7 @@ ZvbiServiceDec_set_contrast(ZvbiServiceDecObj *self, PyObject *args)
 
     if (PyArg_ParseTuple(args, "i", &contrast)) {
         vbi_set_contrast(self->ctx, contrast);
+        Py_INCREF(Py_None);
         RETVAL = Py_None;
     }
     return RETVAL;
@@ -192,6 +197,7 @@ ZvbiServiceDec_teletext_set_default_region(ZvbiServiceDecObj *self, PyObject *ar
 
     if (PyArg_ParseTuple(args, "i", &default_region)) {
         vbi_teletext_set_default_region(self->ctx, default_region);
+        Py_INCREF(Py_None);
         RETVAL = Py_None;
     }
     return RETVAL;
@@ -205,6 +211,7 @@ ZvbiServiceDec_teletext_set_level(ZvbiServiceDecObj *self, PyObject *args)
 
     if (PyArg_ParseTuple(args, "i", &level)) {
         vbi_teletext_set_level(self->ctx, level);
+        Py_INCREF(Py_None);
         RETVAL = Py_None;
     }
     return RETVAL;
@@ -493,6 +500,7 @@ ZvbiServiceDec_event_handler_register(ZvbiServiceDecObj *self, PyObject *args)
                                            zvbi_xs_vt_event_handler,
                                            UINT2PVOID(cb_idx)))
             {
+                Py_INCREF(Py_None);
                 RETVAL = Py_None;
             }
             else {
@@ -517,6 +525,7 @@ ZvbiServiceDec_event_handler_unregister(ZvbiServiceDecObj *self, PyObject *args)
     if (PyArg_ParseTuple(args, "O|O", &handler_obj, &user_data_obj)) {
         unsigned cb_idx = ZvbiCallbacks_free_by_ptr(ZvbiCallbacks.event, self, handler_obj, user_data_obj, TRUE);
         vbi_event_handler_unregister(self->ctx, zvbi_xs_vt_event_handler, UINT2PVOID(cb_idx));
+        Py_INCREF(Py_None);
         RETVAL = Py_None;
     }
     return RETVAL;

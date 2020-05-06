@@ -205,7 +205,7 @@ static PyObject *
 ZvbiRawDec_reset(ZvbiRawDecObj *self, PyObject *args)
 {
     vbi_raw_decoder_reset(&self->rd);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
@@ -256,7 +256,7 @@ ZvbiRawDec_resize(ZvbiRawDecObj *self, PyObject *args)
         return NULL;
     }
     vbi_raw_decoder_resize(&self->rd, start, count);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject *

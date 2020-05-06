@@ -149,7 +149,7 @@ ZvbiCapture_dvb_filter(ZvbiCaptureObj *self, PyObject *args)
         PyErr_Format(ZvbiCaptureError, "Failed to set PID:%d (%s)", strerror(errno));
         return NULL;
     }
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
@@ -187,6 +187,7 @@ ZvbiCapture_read_raw(ZvbiCaptureObj *self, PyObject *args)
                 PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(0));
                 PyStructSequence_SetItem(RETVAL, 2, raw_obj);
                 PyStructSequence_SetItem(RETVAL, 3, Py_None);
+                Py_INCREF(Py_None);
             }
         }
         else {
@@ -233,6 +234,7 @@ ZvbiCapture_read_sliced(ZvbiCaptureObj *self, PyObject *args)
                 PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(n_lines));
                 PyStructSequence_SetItem(RETVAL, 2, Py_None);
                 PyStructSequence_SetItem(RETVAL, 3, ZvbiCaptureSlicedBuf_FromData(p_sliced, n_lines, timestamp));
+                Py_INCREF(Py_None);
             }
             else {
                 PyMem_Free(p_sliced);
@@ -335,6 +337,7 @@ ZvbiCapture_pull_raw(ZvbiCaptureObj *self, PyObject *args)
             PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(0));
             PyStructSequence_SetItem(RETVAL, 2, ZvbiCaptureRawBuf_FromPtr(raw_buffer));
             PyStructSequence_SetItem(RETVAL, 3, Py_None);
+            Py_INCREF(Py_None);
         }
     }
     else {
@@ -375,6 +378,7 @@ ZvbiCapture_pull_sliced(ZvbiCaptureObj *self, PyObject *args)
             PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(sliced_lines));
             PyStructSequence_SetItem(RETVAL, 2, Py_None);
             PyStructSequence_SetItem(RETVAL, 3, ZvbiCaptureSlicedBuf_FromPtr(sliced_buffer));
+            Py_INCREF(Py_None);
         }
     }
     else {
@@ -414,10 +418,13 @@ ZvbiCapture_pull(ZvbiCaptureObj *self, PyObject *args)
         if (RETVAL) {
             PyStructSequence_SetItem(RETVAL, 0, PyFloat_FromDouble(timestamp));
             PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(sliced_lines));
-            if (raw_buffer != NULL)  // DVB devices may not return raw data
+            if (raw_buffer != NULL) {  // DVB devices may not return raw data
                 PyStructSequence_SetItem(RETVAL, 2, ZvbiCaptureRawBuf_FromPtr(raw_buffer));
-            else
+            }
+            else {
                 PyStructSequence_SetItem(RETVAL, 2, Py_None);
+                Py_INCREF(Py_None);
+            }
             PyStructSequence_SetItem(RETVAL, 3, ZvbiCaptureSlicedBuf_FromPtr(sliced_buffer));
         }
     }
@@ -493,7 +500,7 @@ static PyObject *
 ZvbiCapture_flush(ZvbiCaptureObj *self, PyObject *args)
 {
     vbi_capture_flush(self->ctx);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
@@ -508,7 +515,7 @@ ZvbiCapture_set_video_path(ZvbiCaptureObj *self, PyObject *args)
         PyErr_Format(ZvbiCaptureError, "Failed to set video path %s", p_dev_video);
         return NULL;
     }
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject *

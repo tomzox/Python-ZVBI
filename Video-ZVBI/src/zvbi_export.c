@@ -359,6 +359,7 @@ ZvbiExport_option_set(ZvbiExportObj *self, PyObject *args)
             }
 
             if (export_ok) {
+                Py_INCREF(Py_None);
                 RETVAL = Py_None;
             }
             else {
@@ -422,6 +423,7 @@ ZvbiExport_option_menu_set(ZvbiExportObj *self, PyObject *args)
 
     if (PyArg_ParseTuple(args, "si", &keyword, &entry)) {
         if (vbi_export_option_menu_set(self->ctx, keyword, entry)) {
+            Py_INCREF(Py_None);
             RETVAL = Py_None;
         }
         else {
@@ -461,6 +463,7 @@ ZvbiExport_to_stdio(ZvbiExportObj *self, PyObject *args)
         if (fp != NULL) {
             vbi_page * page = ZvbiPage_GetPageBuf(pg_obj);
             if (vbi_export_stdio(self->ctx, fp, page)) {
+                Py_INCREF(Py_None);
                 RETVAL = Py_None;
             }
             else {
@@ -484,6 +487,7 @@ ZvbiExport_to_file(ZvbiExportObj *self, PyObject *args)
     if (PyArg_ParseTuple(args, "O!s", &ZvbiPageTypeDef, &pg_obj, &file_name)) {
         vbi_page * page = ZvbiPage_GetPageBuf(pg_obj);
         if (vbi_export_file(self->ctx, file_name, page)) {
+            Py_INCREF(Py_None);
             RETVAL = Py_None;
         }
         else {
