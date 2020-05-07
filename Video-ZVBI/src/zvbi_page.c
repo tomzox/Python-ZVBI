@@ -512,7 +512,7 @@ ZvbiPage_draw_cc_page(ZvbiPageObj *self, PyObject *args, PyObject *kwds)
             height = self->page->rows;
         }
         if (img_pix_width <= 0) {
-            img_pix_width = width * DRAW_CC_CELL_WIDTH;
+            img_pix_width = self->page->columns * DRAW_CC_CELL_WIDTH;
         }
         if ((width > 0) && (height > 0) &&
             (column + width <= self->page->columns) &&
@@ -522,7 +522,7 @@ ZvbiPage_draw_cc_page(ZvbiPageObj *self, PyObject *args, PyObject *kwds)
         {
             int canvas_type = GET_CANVAS_TYPE(fmt);  /* prior to 0.2.26 only RGBA is supported */
             int rowstride = img_pix_width * canvas_type;
-            int canvas_size = rowstride * (row_pix_off + height * DRAW_CC_CELL_WIDTH);
+            int canvas_size = rowstride * (row_pix_off + height * DRAW_CC_CELL_HEIGHT);
 
             RETVAL = PyBytes_FromStringAndSize(NULL, canvas_size);  // alloc uninitialized buffer
             char * p_buf = PyBytes_AsString(RETVAL);
@@ -766,7 +766,7 @@ ZvbiPage_get_page_size(ZvbiPageObj *self, PyObject *args)
 }
 
 static PyObject *
-ZvbiPage_get_dirty_range(ZvbiPageObj *self, PyObject *args)
+ZvbiPage_get_page_dirty_range(ZvbiPageObj *self, PyObject *args)
 {
     PyObject * RETVAL = PyTuple_New(3);
     if (RETVAL != NULL) {
@@ -887,7 +887,7 @@ static PyMethodDef ZvbiPage_MethodsDef[] =
 
     {"get_page_no",       (PyCFunction) ZvbiPage_get_page_no,        METH_NOARGS, NULL },
     {"get_page_size",     (PyCFunction) ZvbiPage_get_page_size,      METH_NOARGS, NULL },
-    {"get_dirty_range",   (PyCFunction) ZvbiPage_get_dirty_range,    METH_NOARGS, NULL },
+    {"get_page_dirty_range", (PyCFunction) ZvbiPage_get_page_dirty_range, METH_NOARGS, NULL },
     {"get_page_color_map",(PyCFunction) ZvbiPage_get_page_color_map, METH_NOARGS, NULL },
     {"get_page_text_properties", (PyCFunction) ZvbiPage_get_page_text_properties, METH_NOARGS, NULL },
     {"get_page_text",     (PyCFunction) ZvbiPage_get_page_text,      METH_VARARGS, NULL },

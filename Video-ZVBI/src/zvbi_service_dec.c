@@ -116,6 +116,27 @@ ZvbiServiceDec_decode(ZvbiServiceDecObj *self, PyObject *args)
 }
 
 static PyObject *
+ZvbiServiceDec_decode_bytes(ZvbiServiceDecObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    Py_buffer in_buf;
+    unsigned n_lines;
+    double timestamp;
+
+    if (PyArg_ParseTuple(args, "y*If", &in_buf, &n_lines, &timestamp)) {
+        if (n_lines <= in_buf.len / sizeof(vbi_sliced)) {
+            vbi_decode(self->ctx, (vbi_sliced*)in_buf.buf, n_lines, timestamp);
+            Py_INCREF(Py_None);
+            RETVAL = Py_None;
+        }
+        else {
+            PyErr_SetString(ZvbiServiceDecError, "Buffer too short for given number of lines");
+        }
+    }
+    return RETVAL;
+}
+
+static PyObject *
 ZvbiServiceDec_channel_switched(ZvbiServiceDecObj *self, PyObject *args)
 {
     PyObject * RETVAL = NULL;
@@ -536,6 +557,7 @@ ZvbiServiceDec_event_handler_unregister(ZvbiServiceDecObj *self, PyObject *args)
 static PyMethodDef ZvbiServiceDec_MethodsDef[] =
 {
     {"decode",           (PyCFunction) ZvbiServiceDec_decode,           METH_VARARGS, NULL },
+    {"decode_bytes",     (PyCFunction) ZvbiServiceDec_decode_bytes,     METH_VARARGS, NULL },
     {"channel_switched", (PyCFunction) ZvbiServiceDec_channel_switched, METH_VARARGS, NULL },
     {"classify_page",    (PyCFunction) ZvbiServiceDec_classify_page,    METH_VARARGS, NULL },
     {"set_brightness",   (PyCFunction) ZvbiServiceDec_set_brightness,   METH_VARARGS, NULL },

@@ -206,7 +206,6 @@ def decode_sliced(cap_data):
 #
 
 # hysterical compatibility
-# (syntax note: "&" is required here to avoid auto-quoting of the bareword before "=>")
 ServiceWidth = {
         Zvbi.VBI_SLICED_TELETEXT_B:  (42, 0),
         Zvbi.VBI_SLICED_CAPTION_625: (2, 1),
@@ -216,29 +215,31 @@ ServiceWidth = {
         Zvbi.VBI_SLICED_CAPTION_525: (2, 7),
 }
 
+last = 0.0
+
 def binary_sliced(cap_data):
-    last = 0.0
+    global last
 
-    if last > 0.0:
-        print("%f\n%c" % (cap_data.timestamp - last, cap_data.sliced_lines))
-    else:
-        print("%f\n%c", 0.04 % cap_data.sliced_lines)
+    ts = cap_data.timestamp if (last > 0.0) else 0.04
+    outfile.write(bytes("%f\n" % cap_data.timestamp, 'ascii'))
 
-    for i in range (0, cap_data.sliced_lines):
-        (data, slc_id, line) = Zvbi.get_sliced_line(cap_data.sliced_buffer, i)
+    outfile.write(bytes([cap_data.sliced_lines]))
+
+    for data, slc_id, line in cap_data.sliced_buffer:
         if ServiceWidth.get(slc_id) and (ServiceWidth.get(slc_id)[0] > 0):
-            print("%c%c%c" % (ServiceWidth.get(slc_id)[1],
-                              line & 0xFF,
-                              line >> 8), end='')
-#X#            outfile->write(data, ServiceWidth.get(slc_id)->[0])
+            outfile.write(bytes([ServiceWidth.get(slc_id)[1],
+                                 line & 0xFF,
+                                 line >> 8]))
+            data_len = ServiceWidth.get(slc_id)[0]
+            outfile.write(data[0 : data_len])
             last = cap_data.timestamp
 
-#X#    outfile->flush()
+    outfile.flush()
 
 
 def binary_ts_pes(user_data, packet, packet_size):
-#X#    outfile->write(packet, packet_size)
-#X#    outfile->flush()
+    outfile.write(packet[0 : packet_size])
+    outfile.flush()
     return 1
 
 
@@ -251,9 +252,9 @@ def mainloop(cap):
         else:
             cap_data = cap.pull(4000)
 
-#X#        if False:
-#X#                $| = 1
-#X#                outfile->print(".")
+        if False:
+            print(".", file=outfile)
+            outfile.flush()
 
         if dump:
             decode_sliced(cap_data)
@@ -272,7 +273,7 @@ def mainloop(cap):
 def ParseCmdOptions():
     parser = argparse.ArgumentParser(description='ZVBI capturing example')
     parser.add_argument("--desync", action='store_true', default=False)
-    parser.add_argument("--device", type=str, default="/dev/vbi")   # dev_name,
+    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0")  # dev_name,
     parser.add_argument("--ignore-error", action='store_true', default=False)
     parser.add_argument("--pid", type=int, default=-1)
     parser.add_argument("--dump-ttx", action='store_true', default=False)
@@ -290,10 +291,10 @@ def ParseCmdOptions():
     parser.add_argument("--sim", action='store_true', default=False)   # do_sim,
     parser.add_argument("--ntsc", action='store_true', default=False)   # scanning_ntsc,
     parser.add_argument("--pal", action='store_true', default=False)   # scanning_pal,
-    parser.add_argument("--v4l", action='store_true', default=False)   # api_v4l,
-    parser.add_argument("--v4l2", action='store_true', default=False)   # api_v4l2,
-    parser.add_argument("--v4l2-read", action='store_true', default=False)   # api_v4l2, # FIXME
-    parser.add_argument("--v4l2-mmap", action='store_true', default=False)   # api_v4l2, # FIXME
+    #parser.add_argument("--v4l", action='store_true', default=False)   # api_v4l,
+    #parser.add_argument("--v4l2", action='store_true', default=False)   # api_v4l2,
+    #parser.add_argument("--v4l2-read", action='store_true', default=False)   # api_v4l2, # FIXME
+    #parser.add_argument("--v4l2-mmap", action='store_true', default=False)   # api_v4l2, # FIXME
     parser.add_argument("--verbose", action='count', default=0)
     return parser.parse_args()
 
@@ -307,7 +308,7 @@ def main_func():
 
     if opt.dump_ttx or opt.dump_cc or opt.dump_xds:
         print("Teletext, CC and XDS decoding are no longer supported by this tool.\n" +
-              "Run  ./capture --sliced | ./decode --ttx --cc --xds  instead.\n", file=stderr)
+              "Run  ./capture --sliced | ./decode --ttx --cc --xds  instead.\n", file=sys.stderr)
         exit(-1)
 
     services = (Zvbi.VBI_SLICED_VBI_525 |
@@ -352,9 +353,9 @@ def main_func():
 #X#                                  0, #TODO Zvbi.VBI_VIDEOSTD_SET_625_50,
 #X#                                  \&binary_ts_pes)
 #X#        die unless defined mx
-#X#
-#X#    outfile = new IO::Handle
-#X#    outfile->fdopen(fileno(STDOUT), "w")
+
+    global outfile
+    outfile = open(sys.stdout.fileno(), "wb")
 
     mainloop(cap)
 
