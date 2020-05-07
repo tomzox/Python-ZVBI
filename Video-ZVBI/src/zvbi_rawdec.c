@@ -1,0 +1,365 @@
+/*
+ * Copyright (C) 2006-2020 T. Zoerner.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+#define PY_SSIZE_T_CLEAN
+#include "Python.h"
+
+#include <libzvbi.h>
+
+#include "zvbi_rawdec.h"
+#include "zvbi_capture.h"
+#include "zvbi_capture_buf.h"
+
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    PyObject_HEAD
+    vbi_raw_decoder rd;
+} ZvbiRawDecObj;
+
+static PyObject * ZvbiRawDecError;
+
+// ---------------------------------------------------------------------------
+// Sub-functions
+
+/*
+ * Convert a raw decoder C struct into a Python dict
+ */
+PyObject *
+ZvbiRawDec_Par2Dict( const vbi_raw_decoder * p_par )
+{
+    PyObject * dict = PyDict_New();
+    if (dict != NULL) {
+        if ((PyDict_SetItemString(dict, "scanning", PyLong_FromLong(p_par->scanning)) != 0) ||
+            (PyDict_SetItemString(dict, "sampling_format", PyLong_FromLong(p_par->sampling_format)) != 0) ||
+            (PyDict_SetItemString(dict, "sampling_rate", PyLong_FromLong(p_par->sampling_rate)) != 0) ||
+            (PyDict_SetItemString(dict, "bytes_per_line", PyLong_FromLong(p_par->bytes_per_line)) != 0) ||
+            (PyDict_SetItemString(dict, "offset", PyLong_FromLong(p_par->offset)) != 0) ||
+            (PyDict_SetItemString(dict, "start_a", PyLong_FromLong(p_par->start[0])) != 0) ||
+            (PyDict_SetItemString(dict, "start_b", PyLong_FromLong(p_par->start[1])) != 0) ||
+            (PyDict_SetItemString(dict, "count_a", PyLong_FromLong(p_par->count[0])) != 0) ||
+            (PyDict_SetItemString(dict, "count_b", PyLong_FromLong(p_par->count[1])) != 0) ||
+            (PyDict_SetItemString(dict, "interlaced", PyBool_FromLong(p_par->interlaced)) != 0) ||
+            (PyDict_SetItemString(dict, "synchronous", PyBool_FromLong(p_par->synchronous)) != 0))
+        {
+            Py_DECREF(dict);
+            dict = NULL;
+        }
+    }
+    return dict;
+}
+
+/*
+ * Fill a raw decoder C struct with parameters provided in a Python dict.
+ * (This is the reverse of the previous function.)
+ *
+ * The raw decoder struct must have been zeroed or initialized by the caller.
+ */
+void
+ZvbiRawDec_Dict2Par( PyObject * dict, vbi_raw_decoder * p_rd )
+{
+    PyObject * obj;
+
+    if (NULL != (obj = PyDict_GetItemString(dict, "scanning"))) {
+        p_rd->scanning = PyLong_AsLong(obj);
+    }
+    if (NULL != (obj = PyDict_GetItemString(dict, "sampling_format"))) {
+        p_rd->sampling_format = PyLong_AsLong(obj);
+    }
+    if (NULL != (obj = PyDict_GetItemString(dict, "sampling_rate"))) {
+        p_rd->sampling_rate = PyLong_AsLong(obj);
+    }
+    if (NULL != (obj = PyDict_GetItemString(dict, "bytes_per_line"))) {
+        p_rd->bytes_per_line = PyLong_AsLong(obj);
+    }
+    if (NULL != (obj = PyDict_GetItemString(dict, "offset"))) {
+        p_rd->offset = PyLong_AsLong(obj);
+    }
+    if (NULL != (obj = PyDict_GetItemString(dict, "start_a"))) {
+        p_rd->start[0] = PyLong_AsLong(obj);
+    }
+    if (NULL != (obj = PyDict_GetItemString(dict, "start_b"))) {
+        p_rd->start[1] = PyLong_AsLong(obj);
+    }
+    if (NULL != (obj = PyDict_GetItemString(dict, "count_a"))) {
+        p_rd->count[0] = PyLong_AsLong(obj);
+    }
+    if (NULL != (obj = PyDict_GetItemString(dict, "count_b"))) {
+        p_rd->count[1] = PyLong_AsLong(obj);
+    }
+    if (NULL != (obj = PyDict_GetItemString(dict, "interlaced"))) {
+        p_rd->interlaced = PyLong_AsLong(obj);  // converted from PyBool
+    }
+    if (NULL != (obj = PyDict_GetItemString(dict, "synchronous"))) {
+        p_rd->synchronous = PyLong_AsLong(obj);  // converted from PyBool
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+//  VBI raw decoder
+// ---------------------------------------------------------------------------
+
+static PyObject *
+ZvbiRawDec_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+    ZvbiRawDecObj * self = (ZvbiRawDecObj *) type->tp_alloc(type, 0);
+
+    vbi_raw_decoder_init(&self->rd);
+
+    return (PyObject *) self;
+}
+
+static void
+ZvbiRawDec_dealloc(ZvbiRawDecObj *self)
+{
+    vbi_raw_decoder_destroy(&self->rd);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
+}
+
+static int
+ZvbiRawDec_init(ZvbiRawDecObj *self, PyObject *args, PyObject *kwds)
+{
+    static char * kwlist[] = {"par", NULL};
+    int RETVAL = -1;
+    PyObject * obj;
+
+    if (PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &obj)) {
+        return -1;
+    }
+
+    if (PyObject_IsSubclass(obj, (PyObject*)&ZvbiCaptureTypeDef) == 1) {
+        vbi_capture * p_cap = ZvbiCapture_GetCtx(obj);
+        vbi_raw_decoder * p_par = vbi_capture_parameters(p_cap);
+        if (p_par != NULL) {
+            // copy individual parameters from the given container into "self"
+            self->rd.scanning = p_par->scanning;
+            self->rd.sampling_format = p_par->sampling_format;
+            self->rd.sampling_rate = p_par->sampling_rate;
+            self->rd.bytes_per_line = p_par->bytes_per_line;
+            self->rd.offset = p_par->offset;
+            self->rd.start[0] = p_par->start[0];
+            self->rd.start[1] = p_par->start[1];
+            self->rd.count[0] = p_par->count[0];
+            self->rd.count[1] = p_par->count[1];
+            self->rd.interlaced = p_par->interlaced;
+            self->rd.synchronous = p_par->synchronous;
+            RETVAL = 0;
+        }
+        else {
+            PyErr_SetString(ZvbiRawDecError, "failed to get capture parameters from Capture object");
+        }
+    }
+    else if (PyObject_IsSubclass(obj, (PyObject*)&PyDict_Type) == 1) {
+        ZvbiRawDec_Dict2Par(obj, &self->rd);
+        RETVAL = 0;
+    }
+    else {
+        // use standard exception TypeError as this error does not come from ZVBI library
+        PyErr_SetString(PyExc_TypeError, "Parameter is neither dict nor ZVBI capture reference");
+    }
+
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiRawDec_parameters(ZvbiRawDecObj *self, PyObject *args)
+{
+    unsigned services;
+    int scanning;
+    int max_rate;
+
+    if (!PyArg_ParseTuple(args, "Ii", &services, &scanning)) {
+        return NULL;
+    }
+    PyObject * RETVAL = NULL;
+
+    vbi_raw_decoder rd;
+    vbi_raw_decoder_init(&rd);
+    services = vbi_raw_decoder_parameters(&rd, services, scanning, &max_rate);
+    PyObject * dict = ZvbiRawDec_Par2Dict(&rd);
+    vbi_raw_decoder_destroy(&rd);
+
+    if (dict != NULL) {
+        RETVAL = PyTuple_New(3);
+        PyTuple_SetItem(RETVAL, 0, PyLong_FromLong(services));
+        PyTuple_SetItem(RETVAL, 1, PyLong_FromLong(max_rate));
+        PyTuple_SetItem(RETVAL, 2, dict);
+    }
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiRawDec_reset(ZvbiRawDecObj *self, PyObject *args)
+{
+    vbi_raw_decoder_reset(&self->rd);
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+ZvbiRawDec_add_services(ZvbiRawDecObj *self, PyObject *args)
+{
+    unsigned services;
+    int strict = FALSE;
+
+    if (!PyArg_ParseTuple(args, "I|p", &services, &strict)) {
+        return NULL;
+    }
+    services = vbi_raw_decoder_add_services(&self->rd, services, strict);
+    return PyLong_FromLong(services);
+}
+
+static PyObject *
+ZvbiRawDec_check_services(ZvbiRawDecObj *self, PyObject *args)
+{
+    unsigned services;
+    int strict = FALSE;
+
+    if (!PyArg_ParseTuple(args, "I|p", &services, &strict)) {
+        return NULL;
+    }
+    services = vbi_raw_decoder_check_services(&self->rd, services, strict);
+    return PyLong_FromLong(services);
+}
+
+static PyObject *
+ZvbiRawDec_remove_services(ZvbiRawDecObj *self, PyObject *args)
+{
+    unsigned services;
+
+    if (!PyArg_ParseTuple(args, "I", &services)) {
+        return NULL;
+    }
+    services = vbi_raw_decoder_remove_services(&self->rd, services);
+    return PyLong_FromLong(services);
+}
+
+static PyObject *
+ZvbiRawDec_resize(ZvbiRawDecObj *self, PyObject *args)
+{
+    int start[2];
+    unsigned int count[2];
+
+    if (!PyArg_ParseTuple(args, "iIiI", &start[0], &count[0], &start[1], &count[1])) {
+        return NULL;
+    }
+    vbi_raw_decoder_resize(&self->rd, start, count);
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+ZvbiRawDec_decode(ZvbiRawDecObj *self, PyObject *args)
+{
+    PyObject * obj;
+
+    if (!PyArg_ParseTuple(args, "O", &obj)) {
+        return NULL;
+    }
+
+    uint8_t * p_raw = NULL;
+    size_t raw_buf_size = 0;
+
+    if (PyObject_IsSubclass(obj, (PyObject*)&ZvbiCaptureRawBufTypeDef) == 1) {
+        vbi_capture_buffer * p_raw_buf = ZvbiCaptureBuf_GetBuf(obj);
+        if (p_raw_buf != NULL) {
+            raw_buf_size = p_raw_buf->size;
+            p_raw = p_raw_buf->data;
+        }
+        else {
+            PyErr_SetString(ZvbiRawDecError, "Raw capture buffer contains no data");
+        }
+    }
+    else if (PyObject_IsSubclass(obj, (PyObject*)&PyBytes_Type) == 1) {
+        p_raw = (uint8_t*) PyBytes_AsString(obj);
+        raw_buf_size = PyBytes_Size(obj);
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Parameter is neither a ZvbiCaptureRawBuf nor bytes object");
+    }
+    PyObject * RETVAL = NULL;
+
+    if (p_raw != NULL) {
+        size_t raw_size = (self->rd.count[0] + self->rd.count[1]) * self->rd.bytes_per_line;
+        size_t sliced_size = (self->rd.count[0] + self->rd.count[1]) * sizeof(vbi_sliced);
+        if (raw_buf_size >= raw_size) {
+            RETVAL = PyBytes_FromStringAndSize(NULL, sliced_size);
+            vbi_sliced * p_sliced = (vbi_sliced*) PyBytes_AS_STRING(RETVAL);
+            int nof_lines = vbi_raw_decode(&self->rd, p_raw, p_sliced);
+            return PyLong_FromLong(nof_lines);
+        }
+        else {
+            PyErr_SetString(ZvbiRawDecError, "Input raw buffer is smaller than required for VBI geometry");
+        }
+    }
+    return RETVAL;
+}
+
+// ---------------------------------------------------------------------------
+
+static PyMethodDef ZvbiRawDec_MethodsDef[] =
+{
+    {"parameters",      (PyCFunction) ZvbiRawDec_parameters,      METH_VARARGS, NULL },
+    {"reset",           (PyCFunction) ZvbiRawDec_reset,           METH_NOARGS,  NULL },
+    {"add_services",    (PyCFunction) ZvbiRawDec_add_services,    METH_VARARGS, NULL },
+    {"check_services",  (PyCFunction) ZvbiRawDec_check_services,  METH_VARARGS, NULL },
+    {"remove_services", (PyCFunction) ZvbiRawDec_remove_services, METH_VARARGS, NULL },
+    {"resize",          (PyCFunction) ZvbiRawDec_resize,          METH_VARARGS, NULL },
+    {"decode",          (PyCFunction) ZvbiRawDec_decode,          METH_VARARGS, NULL },
+    {NULL}  /* Sentinel */
+};
+
+static PyTypeObject ZvbiRawDecTypeDef =
+{
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "Zvbi.RawDec",
+    .tp_doc = PyDoc_STR("Class for decoding raw capture output"),
+    .tp_basicsize = sizeof(ZvbiRawDecObj),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = ZvbiRawDec_new,
+    .tp_init = (initproc) ZvbiRawDec_init,
+    .tp_dealloc = (destructor) ZvbiRawDec_dealloc,
+    //.tp_repr = (PyObject * (*)(PyObject*)) ZvbiRawDec_Repr,
+    .tp_methods = ZvbiRawDec_MethodsDef,
+    //.tp_members = ZvbiRawDec_Members,
+};
+
+int PyInit_RawDec(PyObject * module, PyObject * error_base)
+{
+    if (PyType_Ready(&ZvbiRawDecTypeDef) < 0) {
+        return -1;
+    }
+
+    // create exception class
+    ZvbiRawDecError = PyErr_NewException("Zvbi.RawDecError", error_base, NULL);
+    Py_XINCREF(ZvbiRawDecError);
+    if (PyModule_AddObject(module, "RawDecError", ZvbiRawDecError) < 0) {
+        Py_XDECREF(ZvbiRawDecError);
+        Py_CLEAR(ZvbiRawDecError);
+        Py_DECREF(module);
+        return -1;
+    }
+
+    // create class type object
+    Py_INCREF(&ZvbiRawDecTypeDef);
+    if (PyModule_AddObject(module, "RawDec", (PyObject *) &ZvbiRawDecTypeDef) < 0) {
+        Py_DECREF(&ZvbiRawDecTypeDef);
+        Py_XDECREF(ZvbiRawDecError);
+        Py_CLEAR(ZvbiRawDecError);
+        return -1;
+    }
+
+    return 0;
+}
