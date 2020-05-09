@@ -194,9 +194,11 @@ ZvbiRawDec_parameters(ZvbiRawDecObj *self, PyObject *args)
 
     if (dict != NULL) {
         RETVAL = PyTuple_New(3);
-        PyTuple_SetItem(RETVAL, 0, PyLong_FromLong(services));
-        PyTuple_SetItem(RETVAL, 1, PyLong_FromLong(max_rate));
-        PyTuple_SetItem(RETVAL, 2, dict);
+        if (RETVAL != NULL) {
+            PyTuple_SetItem(RETVAL, 0, PyLong_FromLong(services));
+            PyTuple_SetItem(RETVAL, 1, PyLong_FromLong(max_rate));
+            PyTuple_SetItem(RETVAL, 2, dict);
+        }
     }
     return RETVAL;
 }
@@ -212,9 +214,9 @@ static PyObject *
 ZvbiRawDec_add_services(ZvbiRawDecObj *self, PyObject *args)
 {
     unsigned services;
-    int strict = FALSE;
+    int strict = 0;
 
-    if (!PyArg_ParseTuple(args, "I|p", &services, &strict)) {
+    if (!PyArg_ParseTuple(args, "I|I", &services, &strict)) {
         return NULL;
     }
     services = vbi_raw_decoder_add_services(&self->rd, services, strict);
@@ -225,9 +227,9 @@ static PyObject *
 ZvbiRawDec_check_services(ZvbiRawDecObj *self, PyObject *args)
 {
     unsigned services;
-    int strict = FALSE;
+    int strict = 0;
 
-    if (!PyArg_ParseTuple(args, "I|p", &services, &strict)) {
+    if (!PyArg_ParseTuple(args, "I|I", &services, &strict)) {
         return NULL;
     }
     services = vbi_raw_decoder_check_services(&self->rd, services, strict);
@@ -294,10 +296,20 @@ ZvbiRawDec_decode(ZvbiRawDecObj *self, PyObject *args)
         size_t raw_size = (self->rd.count[0] + self->rd.count[1]) * self->rd.bytes_per_line;
         size_t sliced_size = (self->rd.count[0] + self->rd.count[1]) * sizeof(vbi_sliced);
         if (raw_buf_size >= raw_size) {
-            RETVAL = PyBytes_FromStringAndSize(NULL, sliced_size);
-            vbi_sliced * p_sliced = (vbi_sliced*) PyBytes_AS_STRING(RETVAL);
-            int nof_lines = vbi_raw_decode(&self->rd, p_raw, p_sliced);
-            return PyLong_FromLong(nof_lines);
+            RETVAL = PyTuple_New(3);
+            if (RETVAL != NULL) {
+                PyObject * sliced_obj = PyBytes_FromStringAndSize(NULL, sliced_size);
+                if (sliced_obj != NULL) {
+                    vbi_sliced * p_sliced = (vbi_sliced*) PyBytes_AS_STRING(RETVAL);
+
+                    int nof_lines = vbi_raw_decode(&self->rd, p_raw, p_sliced);
+                    PyTuple_SetItem(RETVAL, 0, PyLong_FromLong(nof_lines));
+                    PyTuple_SetItem(RETVAL, 1, sliced_obj);
+                }
+                else {
+                    Py_DECREF(RETVAL);
+                }
+            }
         }
         else {
             PyErr_SetString(ZvbiRawDecError, "Input raw buffer is smaller than required for VBI geometry");
@@ -310,7 +322,8 @@ ZvbiRawDec_decode(ZvbiRawDecObj *self, PyObject *args)
 
 static PyMethodDef ZvbiRawDec_MethodsDef[] =
 {
-    {"parameters",      (PyCFunction) ZvbiRawDec_parameters,      METH_VARARGS, NULL },
+    {"parameters",      (PyCFunction) ZvbiRawDec_parameters, METH_VARARGS | METH_STATIC, NULL },
+
     {"reset",           (PyCFunction) ZvbiRawDec_reset,           METH_NOARGS,  NULL },
     {"add_services",    (PyCFunction) ZvbiRawDec_add_services,    METH_VARARGS, NULL },
     {"check_services",  (PyCFunction) ZvbiRawDec_check_services,  METH_VARARGS, NULL },

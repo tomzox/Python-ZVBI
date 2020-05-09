@@ -317,6 +317,9 @@ ZvbiServiceDec_page_title(ZvbiServiceDecObj *self, PyObject *args)
 //  Event Handling
 // ---------------------------------------------------------------------------
 
+// FIXME use different sub-types for event types;
+// FIXME use named tuple instead of dict
+
 /*
  * Convert event description structs into Perl hashes
  */

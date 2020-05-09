@@ -383,6 +383,7 @@ PyObject * ZvbiPage_New(vbi_page * page, vbi_bool do_free_pg)
     return (PyObject *) self;
 }
 
+// FIXME should offer explicit destruct else life-time may be longer than expected
 static void
 ZvbiPage_dealloc(ZvbiPageObj *self)
 {
@@ -461,7 +462,7 @@ ZvbiPage_draw_vt_page(ZvbiPageObj *self, PyObject *args, PyObject *kwds)
 
             RETVAL = PyBytes_FromStringAndSize(NULL, canvas_size);  // alloc uninitialized buffer
             char * p_buf = PyBytes_AsString(RETVAL);
-            memset(p_buf, 0, canvas_size);
+            memset(p_buf, 0, canvas_size);  // needed in case col_pix_off|row_pix_off > 0
 
             vbi_draw_vt_page_region(self->page, fmt,
                                     p_buf + (row_pix_off * rowstride) + col_pix_off,
@@ -526,7 +527,7 @@ ZvbiPage_draw_cc_page(ZvbiPageObj *self, PyObject *args, PyObject *kwds)
 
             RETVAL = PyBytes_FromStringAndSize(NULL, canvas_size);  // alloc uninitialized buffer
             char * p_buf = PyBytes_AsString(RETVAL);
-            memset(p_buf, 0, canvas_size);
+            memset(p_buf, 0, canvas_size);  // needed in case col_pix_off|row_pix_off > 0
 
             vbi_draw_cc_page_region(self->page, fmt,
                                     p_buf + (row_pix_off * rowstride) + col_pix_off,

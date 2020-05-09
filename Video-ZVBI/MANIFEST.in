@@ -6,3 +6,5 @@ include test.py
 include src/*
 include doc/*
 include examples/*
+exclude examples/*.pl
+exclude src/typemap

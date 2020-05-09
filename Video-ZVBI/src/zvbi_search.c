@@ -59,6 +59,7 @@ zvbi_xs_search_progress( vbi_page * p_pg, unsigned cb_idx )
             result = (PyObject_IsTrue(cb_rslt) == 1);
         }
         Py_DECREF(pg_obj);
+        // TODO: page becomes invalid here; protect from access e.g. by setting pg_obj->page := NULL
 
         // clear exceptions as we cannot handle them here
         if (PyErr_Occurred() != NULL) {

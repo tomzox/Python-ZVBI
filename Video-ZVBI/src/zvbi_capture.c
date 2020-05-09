@@ -62,11 +62,11 @@ static int
 ZvbiCapture_init(ZvbiCaptureObj *self, PyObject *args, PyObject *kwds)
 {
     static char * kwlist[] = {"dev",
-                              "services",
+                              "services",   // analog only
                               "dvb_pid",
                               "buffers",    // v4l2 only
-                              "scanning",       // all except v4l2
-                              "dev_fd",         // sidecar only
+                              "scanning",   // v4l1+bkr only
+                              //"dev_fd",   // sidecar only
                               "proxy",
                               "strict",
                               "trace",
@@ -76,9 +76,9 @@ ZvbiCapture_init(ZvbiCaptureObj *self, PyObject *args, PyObject *kwds)
     unsigned dvb_pid = 0;
     int buffers = 5;
     int scanning = 0;
-    int dev_fd = -1;
+    //int dev_fd = -1;
     PyObject * proxy = NULL;
-    int strict = FALSE;
+    int strict = 0;
     int trace = FALSE;
 
     // reset state in case the module is already initialized
@@ -87,9 +87,9 @@ ZvbiCapture_init(ZvbiCaptureObj *self, PyObject *args, PyObject *kwds)
         self->ctx = NULL;
     }
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|$IIiiiO!pp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|$IIiiO!Ip", kwlist,
                                      &dev_name, &services, &dvb_pid,
-                                     &buffers, &scanning, &dev_fd,
+                                     &buffers, &scanning, //&dev_fd,
                                      &ZvbiProxyTypeDef, &proxy,
                                      &strict, &trace))
     {
@@ -105,6 +105,7 @@ ZvbiCapture_init(ZvbiCaptureObj *self, PyObject *args, PyObject *kwds)
         // FIXME does not work for DVB
         self->ctx = vbi_capture_proxy_new(ZvbiProxy_GetCtx(proxy), buffers, scanning, &self->services, strict, &errorstr);
     }
+#if 0  /* obsolete */
     else if (dev_fd != -1) {
         if (dvb_pid == 0) {
             self->ctx = vbi_capture_v4l_sidecar_new(dev_name, dev_fd, &self->services, strict, &errorstr, trace);
@@ -113,17 +114,22 @@ ZvbiCapture_init(ZvbiCaptureObj *self, PyObject *args, PyObject *kwds)
             errorstr = strdup("Invalid combination of option dvb_pid with dev_fd");
         }
     }
+#endif
     else {
         // note also works with default value 0 for PID (can be set later using dvb_filter)
         self->ctx = vbi_capture_dvb_new2(dev_name, dvb_pid, &errorstr, trace);
 
         if (self->ctx == NULL) {
+            // FIXME free errorstr if not NULL, or concatenate
             self->ctx = vbi_capture_v4l2_new(dev_name, buffers, &self->services, strict, &errorstr, trace);
         }
+#if 0  /* obsolete */
         if (self->ctx == NULL) {
             self->ctx = vbi_capture_v4l_new(dev_name, scanning, &self->services, strict, &errorstr, trace);
         }
+#endif
         if (self->ctx == NULL) {
+            // FIXME free errorstr if not NULL, or concatenate
             self->ctx = vbi_capture_bktr_new(dev_name, scanning, &self->services, strict, &errorstr, trace);
         }
     }
@@ -468,11 +474,11 @@ ZvbiCapture_update_services(ZvbiCaptureObj *self, PyObject *args)
     unsigned int services = 0;
     int reset = FALSE;
     int commit = FALSE;
-    int strict = FALSE;
+    int strict = 0;
     char * errorstr = NULL;
     PyObject * RETVAL;
 
-    if (!PyArg_ParseTuple(args, "I|$ppp", &services, &reset, &commit, &strict)) {
+    if (!PyArg_ParseTuple(args, "I|$ppI", &services, &reset, &commit, &strict)) {
         return NULL;
     }
     services = vbi_capture_update_services(self->ctx, reset, commit, services, strict, &errorstr);
@@ -504,21 +510,6 @@ ZvbiCapture_flush(ZvbiCaptureObj *self, PyObject *args)
 }
 
 static PyObject *
-ZvbiCapture_set_video_path(ZvbiCaptureObj *self, PyObject *args)
-{
-    const char * p_dev_video;
-
-    if (!PyArg_ParseTuple(args, "s", &p_dev_video)) {
-        return NULL;
-    }
-    if (vbi_capture_set_video_path(self->ctx, p_dev_video) == FALSE) {
-        PyErr_Format(ZvbiCaptureError, "Failed to set video path %s", p_dev_video);
-        return NULL;
-    }
-    Py_RETURN_NONE;
-}
-
-static PyObject *
 ZvbiCapture_get_fd_flags(ZvbiCaptureObj *self, PyObject *args)
 {
     VBI_CAPTURE_FD_FLAGS RETVAL = vbi_capture_get_fd_flags(self->ctx);
@@ -545,7 +536,6 @@ static PyMethodDef ZvbiCapture_MethodsDef[] =
     {"update_services", (PyCFunction) ZvbiCapture_update_services, METH_VARARGS, NULL },
     {"get_scanning",    (PyCFunction) ZvbiCapture_get_scanning,    METH_NOARGS,  NULL },
     {"flush",           (PyCFunction) ZvbiCapture_flush,           METH_NOARGS,  NULL },
-    {"set_video_path",  (PyCFunction) ZvbiCapture_set_video_path,  METH_VARARGS, NULL },
     {"get_fd_flags",    (PyCFunction) ZvbiCapture_get_fd_flags,    METH_NOARGS,  NULL },
 
     {NULL}  /* Sentinel */

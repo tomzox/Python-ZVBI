@@ -306,7 +306,6 @@ def old_mainloop():
         # pass the full frame's data to the decoder
         vbi.decode_bytes(buf, n_lines, timestamp)
 
-        # FIXME: reading from STDIN, so tk.fileevent(readable) could be used instead of polling
         tk.after(20, old_mainloop)
 
     else:
