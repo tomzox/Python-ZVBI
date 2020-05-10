@@ -25,6 +25,7 @@
 #include "zvbi_page.h"
 #include "zvbi_export.h"
 #include "zvbi_search.h"
+#include "zvbi_callbacks.h"
 
 #include "zvbi_dvb_mux.h"
 #include "zvbi_dvb_demux.h"
@@ -48,7 +49,8 @@
 
 PyObject * ZvbiError;
 
-#if 0
+// ---------------------------------------------------------------------------
+
 /*
  * Invoke callback for log messages.
  */
@@ -56,37 +58,31 @@ static void
 zvbi_xs_log_callback( vbi_log_mask           level,
                       const char *           context,
                       const char *           message,
-                      void *                 user_data)
+                      void *                 vp_cb_idx)
 {
-        dMY_CXT;
-        SV * perl_cb;
-        unsigned cb_idx = PVOID2UINT(user_data);
+    unsigned cb_idx = PVOID2UINT(vp_cb_idx);
+    PyObject * cb_obj;
 
-        if ( (cb_idx < ZVBI_MAX_CB_COUNT) &&
-             ((perl_cb = MY_CXT.log[cb_idx].p_cb) != NULL) ) {
+    if ( (cb_idx < ZVBI_MAX_CB_COUNT) &&
+         ((cb_obj = ZvbiCallbacks.log[cb_idx].p_cb) != NULL) )
+    {
+        PyObject * user_data = ZvbiCallbacks.log[cb_idx].p_data;  // INCREF done by Py_BuildValue
 
-                dSP ;
-                ENTER ;
-                SAVETMPS ;
+        // invoke the Python subroutine
+        PyObject * cb_rslt = (user_data
+            ? PyObject_CallFunction(cb_obj, "IssO", level, context, message, user_data)
+            : PyObject_CallFunction(cb_obj, "Iss", level, context, message));
 
-                /* push the function parameters on the Perl interpreter stack */
-                PUSHMARK(SP) ;
-                XPUSHs(sv_2mortal (newSViv (level)));
-                mXPUSHp(context, strlen(context));
-                mXPUSHp(message, strlen(message));
-                if (MY_CXT.log[cb_idx].p_data != NULL) {
-                        XPUSHs(MY_CXT.log[cb_idx].p_data);
-                }
-                PUTBACK ;
-
-                /* invoke the Perl subroutine */
-                call_sv(perl_cb, G_VOID | G_DISCARD) ;
-
-                FREETMPS ;
-                LEAVE ;
+        if (cb_rslt != NULL) {
+            Py_DECREF(cb_rslt);
         }
+
+        // clear exceptions as we cannot handle them here
+        if (PyErr_Occurred() != NULL) {
+            PyErr_Print();
+        }
+    }
 }
-#endif
 
 // ---------------------------------------------------------------------------
 //  Parity and Hamming decoding and encoding
@@ -370,38 +366,50 @@ Zvbi_check_lib_version(PyObject *self, PyObject *args)
     return PyBool_FromLong(ok);
 }
 
-#if 0
-void
-set_log_fn(mask, log_fn=NULL, user_data=NULL)
-        unsigned int mask
-        CV * log_fn
-        SV * user_data
-        PREINIT:
-        dMY_CXT;
-        unsigned cb_idx;
-        CODE:
-        zvbi_xs_free_callback_by_obj(MY_CXT.log, NULL);
-        if (log_fn != NULL) {
-                cb_idx = zvbi_xs_alloc_callback(MY_CXT.log, (SV*)log_fn, user_data, NULL);
-                if (cb_idx < ZVBI_MAX_CB_COUNT) {
-                        vbi_set_log_fn(mask, zvbi_xs_log_callback, UINT2PVOID(cb_idx));
-                } else {
-                        vbi_set_log_fn(mask, NULL, NULL);
-                        croak ("Max. log callback count exceeded");
-                }
-        } else {
-                vbi_set_log_fn(mask, NULL, NULL);
-        }
+static PyObject *
+Zvbi_set_log_fn(PyObject *self, PyObject *args)
+{
+    unsigned mask = 0;
+    PyObject * log_fn = NULL;
+    PyObject * user_data = NULL;
+    PyObject * RETVAL = NULL;
 
-void
-set_log_on_stderr(mask)
-        unsigned int mask
-        PREINIT:
-        dMY_CXT;
-        CODE:
-        zvbi_xs_free_callback_by_obj(MY_CXT.log, NULL);
-        vbi_set_log_fn(mask, vbi_log_on_stderr, NULL);
-#endif
+    if (!PyArg_ParseTuple(args, "IO|O", &mask, &log_fn, &user_data))
+        return NULL;
+
+    ZvbiCallbacks_free_by_obj(ZvbiCallbacks.log, NULL);
+    if (log_fn != NULL) {
+        unsigned cb_idx = ZvbiCallbacks_alloc(ZvbiCallbacks.log, log_fn, user_data, NULL);
+        if (cb_idx < ZVBI_MAX_CB_COUNT) {
+            vbi_set_log_fn(mask, zvbi_xs_log_callback, UINT2PVOID(cb_idx));
+            Py_INCREF(Py_None);
+            RETVAL = Py_None;
+        }
+        else {
+            PyErr_SetString(ZvbiError, "Max. log callback count exceeded");
+        }
+    }
+    else {
+        vbi_set_log_fn(0, NULL, NULL);
+        Py_INCREF(Py_None);
+        RETVAL = Py_None;
+    }
+    return RETVAL;
+}
+
+static PyObject *
+Zvbi_set_log_on_stderr(PyObject *self, PyObject *args)
+{
+    unsigned mask = 0;
+
+    if (!PyArg_ParseTuple(args, "I", &mask))
+        return NULL;
+
+    ZvbiCallbacks_free_by_obj(ZvbiCallbacks.log, NULL);
+    vbi_set_log_fn(mask, vbi_log_on_stderr, NULL);
+
+    Py_RETURN_NONE;
+}
 
 static PyObject *
 Zvbi_decode_vps_cni(PyObject *self, PyObject *args)
@@ -447,51 +455,48 @@ Zvbi_encode_vps_cni(PyObject *self, PyObject *args)
     return RETVAL;
 }
 
-#if 0
+static PyObject *
+Zvbi_iconv_caption(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    Py_buffer in_buf;
+    int repl_char = '?';
 
-void
-iconv_caption(sv_src, repl_char=0)
-        SV * sv_src
-        int repl_char
-        PREINIT:
-        char * p_src;
-        char * p_buf;
-        STRLEN src_len;
-        SV * sv;
-        PPCODE:
-        p_src = (void *) SvPV(sv_src, src_len);
-        p_buf = vbi_strndup_iconv_caption("UTF-8", p_src, src_len, '?');
+    if (PyArg_ParseTuple(args, "s*|C", &in_buf, &repl_char)) {
+        char * p_buf = vbi_strndup_iconv_caption("UTF-8", in_buf.buf, in_buf.len, repl_char);
         if (p_buf != NULL) {
-                sv = newSV(0);
-                sv_usepvn(sv, p_buf, strlen(p_buf));
-                /* now the pointer is managed by perl -> no free() */
-                SvUTF8_on(sv);
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal (sv));
+            RETVAL = PyBytes_FromString(p_buf);
         }
+        else {
+            // source buffer contains invalid two-byte chars (or out of memory)
+            PyErr_SetString(ZvbiError, "conversion failed");
+        }
+        PyBuffer_Release(&in_buf);
+    }
+    return RETVAL;
+}
 
-void
-caption_unicode(c, to_upper=0)
-        unsigned int c
-        vbi_bool to_upper
-        PREINIT:
-        UV ucs;
-        U8 buf[10];
-        U8 * p;
-        SV * sv;
-        PPCODE:
-        ucs = vbi_caption_unicode(c, to_upper);
+static PyObject *
+Zvbi_caption_unicode(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    unsigned inp_char = 0;
+    int to_upper = FALSE;
+
+    if (PyArg_ParseTuple(args, "I|p", &inp_char, &to_upper)) {
+        unsigned ucs = vbi_caption_unicode(inp_char, to_upper);
         if (ucs != 0) {
-                p = uvuni_to_utf8(buf, ucs);
-                sv = sv_2mortal(newSVpvn(buf, p - buf));
-                SvUTF8_on(sv);
-        } else {
-                sv = sv_2mortal(newSVpvn("", 0));
+            RETVAL = PyUnicode_New(1, 1114111);  // UCS-4
+            if (RETVAL != NULL) {
+                PyUnicode_WRITE(PyUnicode_KIND(RETVAL), PyUnicode_DATA(RETVAL), 0, ucs);
+            }
         }
-        EXTEND(sp, 1);
-        PUSHs (sv);
-
-#endif  // if 0
+        else {
+            PyErr_SetString(ZvbiError, "conversion failed");
+        }
+    }
+    return RETVAL;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -516,9 +521,14 @@ static PyMethodDef Zvbi_Methods[] =
 
     {"lib_version",       Zvbi_lib_version,       METH_NOARGS,  PyDoc_STR("Return tuple with library version")},
     {"check_lib_version", Zvbi_check_lib_version, METH_VARARGS, PyDoc_STR("Check if library version is equal or newer than the given")},
+    {"set_log_fn",        Zvbi_set_log_fn,        METH_VARARGS, NULL},
+    {"set_log_on_stderr", Zvbi_set_log_on_stderr, METH_VARARGS, NULL},
 
     {"decode_vps_cni",    Zvbi_decode_vps_cni,    METH_VARARGS, NULL},
     {"encode_vps_cni",    Zvbi_encode_vps_cni,    METH_VARARGS, NULL},
+
+    {"iconv_caption",     Zvbi_iconv_caption,     METH_VARARGS, NULL},
+    {"caption_unicode",   Zvbi_caption_unicode,   METH_VARARGS, NULL},
 
     {NULL}       // sentinel
 };

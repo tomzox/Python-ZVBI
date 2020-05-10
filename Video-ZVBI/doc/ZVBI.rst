@@ -3249,7 +3249,7 @@ Zvbi.iconv_caption()
 
 ::
 
-    str = Zvbi.iconv_caption(src [, repl_char] )
+    str = Zvbi.iconv_caption(src, repl_char='?')
 
 Converts a string of EIA 608 Closed Caption characters to UTF-8.
 The function ignores parity bits and the bytes 0x00 ... 0x1F,
@@ -3271,9 +3271,9 @@ Zvbi.caption_unicode()
 
 ::
 
-    str = Zvbi.caption_unicode(c [, to_upper] )
+    str = Zvbi.caption_unicode(c, to_upper=False)
 
-Converts a single Closed Caption character code into an UTF-8 string.
+Converts a single Closed Caption character code into a Unicode string.
 Codes in range 0x1130 to 0x1B3F are special and extended characters
 (e.g. caption command 11 37).
 
@@ -3287,7 +3287,7 @@ Input character codes in *c* are in ranges:
 * 0x1320 ... 0x133F
 * 0x1B20 ... 0x1B3F
 
-When the optional *to_upper* is set to 1, the character is converted
+When True is passed as optional second parameter, the character is converted
 into upper case. (Often programs are captioned in all upper case, but
 except for one character the basic and special CC character sets contain
 only lower case accented characters.)
@@ -3301,81 +3301,92 @@ contains a number of scripts used to test the various interface
 functions. You can also use them as examples for your code:
 
 :capture.py:
-    This is a translation of `test/capture.c` in the libzvbi package.
+    Example for the use of class `Zvbi.Capture`_.
     The script captures sliced VBI data from a device.  Output can be
     written to a file or passed via stdout into one of the following
     example scripts.  Call with option `--help` for a list of options.
+    (This is a translation of `test/capture.c` in the libzvbi package.)
 
 :decode.py:
-    This is a direct translation of `test/decode.c` in the libzvbi package.
+    Example for the use of class `Zvbi.ServiceDec`_.
     Decodes sliced VBI data on stdin, e. g. ::
 
       ./capture --sliced | ./decode --ttx
 
     Call with option `--help` for a list of options.
+    (This is a direct translation of `test/decode.c` in the libzvbi package.)
 
 :caption.py:
-    This is a translation of `test/caption.c` in the libzvbi package,
-    albeit based on TkInter here.
+    Example for the use of class `Zvbi.ServiceDec`_, type *Zvbi.VBI_EVENT_CAPTION*.
     When called without an input stream, the application displays some
     sample messages (character sets etc.) for debugging the decoder.
     When the input stream is the output of `capture.py --sliced`
     (see above), the applications displays the live CC stream received
     from a VBI device.  The buttons on top switch between Closed Caption
     channels 1-4 and Text channels 1-4.
+    (This is a translation of `test/caption.c` in the libzvbi package,
+    albeit based on TkInter here.)
 
 :export.py:
-    This is a direct translation of `test/export.c` in the libzvbi package.
+    Example for the use of export actions in class `Zvbi.Export`_.
     The script captures from `/dev/vbi0` until the page specified on the
     command line is found and then exports the page in a requested format.
+    (This is a direct translation of `test/export.c` in the libzvbi package.)
 
 :explist.py:
-    This is a direct translation of `test/explist.c` in the libzvbi package.
+    Example for the use of export option management in class `Zvbi.Export`_.
     Test of page export options and menu interfaces.  The script lists
     all available export modules (i.e. formats) and options.
+    (This is a direct translation of `test/explist.c` in the libzvbi package.)
 
 :hamm.py:
-    This is a direct translation of `test/hamm.c` in the libzvbi package.
     Automated test of the odd parity and Hamming encoder and decoder functions.
+    Note this test runs for a long time.
+    (This is a direct translation of `test/hamm.c` in the libzvbi package.)
 
 :network.py:
-    This is a direct translation of `examples/network.c` in the libzvbi package.
+    Example for the use of class `Zvbi.ServiceDec`_, type *Zvbi.VBI_EVENT_NETWORK*.
     The script captures from `/dev/vbi0` until the currently tuned channel is
     identified by means of VPS, PDC et.al.
+    (This is a direct translation of `examples/network.c` in the libzvbi package.)
 
 :proxy-test.py:
-    This is a direct translation of `test/proxy-test.c` in the libzvbi package.
+    Example for the use of class `Zvbi.Proxy`_.
     The script can capture either from a proxy daemon or a local device and
     dumps captured data on the terminal. Also allows changing services and
     channels during capturing (e.g. by entering "+ttx" or "-ttx" on stdin.)
     Start with option `-help` for a list of supported command line options.
+    (This is a direct translation of `test/proxy-test.c` in the libzvbi package.)
 
 :test-vps.py:
-    This is a direct translation of `test/test-vps.c` in the libzvbi package.
-    It contains tests for encoding and decoding the VPS data service on
+    This script contains tests for encoding and decoding the VPS data service on
     randomly generated data.
+    (This is a direct translation of `test/test-vps.c` in the libzvbi package.)
 
 :search-ttx.py:
-    The script is used to test search on teletext pages. The script
-    captures from `/dev/vbi0` until the RETURN key is pressed, then prompts
-    for a search string.  The content of matching pages is printed on
-    the terminal and capturing continues until a new search text is
-    entered.
+    Example for the use of class `Zvbi.Search`_.
+    The script captures and caches teletext pages until the RETURN key is
+    pressed, then prompts for a search string.  A search across teletext pages
+    is started, and the content of matching pages is printed on the terminal.
 
 :browse-ttx.py:
     The script captures from `/dev/vbi0` and displays teletext pages in
     a small GUI using TkInter.
 
 :osc.py:
-    This script is loosely based on `test/osc.c` in the libzvbi package.
+    Example for the use of class `Zvbi.RawDec`_.
     The script captures raw VBI data from a device and displays the data as
     an animated gray-scale image. One selected line is plotted and the decoded
     teletext or VPS Data of that line is shown.
+    (This script is loosely based on `test/osc.c` in the libzvbi package.)
 
 :dvb-mux.py:
+    Example for the use of class `Zvbi.DvbMux`_.
     This script is a small example for use of the DVD multiplexer functions
     The scripts captures teletext from an analog VBI device and generates
-    a PES or TS stream on STDOUT.
+    a PES or TS stream on STDOUT.  Output can be decoded with ::
+
+        ./decode.py --pes --all < dvb_mux.out
 
 Authors
 =======

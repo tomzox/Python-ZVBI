@@ -79,12 +79,14 @@ ZvbiCaptureSlicedBuf_IterNext(ZvbiCaptureBufObj *self)
         p_sliced += self->iter_idx;
 
         RETVAL = PyTuple_New(3);
-        PyTuple_SetItem(RETVAL, 0, PyBytes_FromStringAndSize((char*)p_sliced->data,
-                                                             sizeof(p_sliced->data)));
-        PyTuple_SetItem(RETVAL, 1, PyLong_FromLong(p_sliced->id));
-        PyTuple_SetItem(RETVAL, 2, PyLong_FromLong(p_sliced->line));
+        if (RETVAL != NULL) {
+            PyTuple_SetItem(RETVAL, 0, PyBytes_FromStringAndSize((char*)p_sliced->data,
+                                                                 sizeof(p_sliced->data)));
+            PyTuple_SetItem(RETVAL, 1, PyLong_FromLong(p_sliced->id));
+            PyTuple_SetItem(RETVAL, 2, PyLong_FromLong(p_sliced->line));
 
-        self->iter_idx += 1;
+            self->iter_idx += 1;
+        }
     }
     else
     {
@@ -94,6 +96,56 @@ ZvbiCaptureSlicedBuf_IterNext(ZvbiCaptureBufObj *self)
     return RETVAL;
 }
 
+/*
+ * Implmentation of the len() operator
+ */
+Py_ssize_t ZvbiCaptureSlicedBuf_MappingLength(ZvbiCaptureBufObj * self)
+{
+    Py_ssize_t result = -1;
+
+    vbi_capture_buffer * p_sliced_buf = self->buf;
+    if (p_sliced_buf != NULL) {
+        // FIXME should use "n_lines"
+        result = p_sliced_buf->size / sizeof(vbi_sliced);
+    }
+    return result;
+}
+
+/*
+ * Implementation of sub-script look-up (as alternative to iterator)
+ */
+PyObject * ZvbiCaptureSlicedBuf_MappingSubscript(ZvbiCaptureBufObj * self, PyObject * key)
+{
+    vbi_sliced * p_sliced = NULL;
+    unsigned max_lines = 0;
+    PyObject * RETVAL = NULL;
+
+    long idx = PyLong_AsLong(key);
+    if (idx >= 0) {
+        vbi_capture_buffer * p_sliced_buf = self->buf;
+        if (p_sliced_buf != NULL) {
+            // FIXME should use "n_lines"
+            max_lines = p_sliced_buf->size / sizeof(vbi_sliced);
+            p_sliced = p_sliced_buf->data;
+        }
+        if ((p_sliced != NULL) && (idx < max_lines)) {
+            p_sliced += idx;
+
+            RETVAL = PyTuple_New(3);
+            if (RETVAL != NULL) {
+                PyTuple_SetItem(RETVAL, 0, PyBytes_FromStringAndSize((char*)p_sliced->data,
+                                                                     sizeof(p_sliced->data)));
+                PyTuple_SetItem(RETVAL, 1, PyLong_FromLong(p_sliced->id));
+                PyTuple_SetItem(RETVAL, 2, PyLong_FromLong(p_sliced->line));
+            }
+        }
+        else
+        {
+            PyErr_SetNone(PyExc_IndexError);
+        }
+    }
+    return RETVAL;
+}
 
 static PyTypeObject ZvbiCaptureBufTypeDef =
 {
@@ -120,6 +172,13 @@ PyTypeObject ZvbiCaptureRawBufTypeDef =
     .tp_base = &ZvbiCaptureBufTypeDef,
 };
 
+static PyMappingMethods ZvbiCaptureSlicedBufMappingDef =
+{
+    .mp_length = (lenfunc) ZvbiCaptureSlicedBuf_MappingLength,
+    .mp_subscript = (binaryfunc) ZvbiCaptureSlicedBuf_MappingSubscript,
+    .mp_ass_subscript = NULL  // assignment not allowed
+};
+
 PyTypeObject ZvbiCaptureSlicedBufTypeDef =
 {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -133,6 +192,7 @@ PyTypeObject ZvbiCaptureSlicedBufTypeDef =
     .tp_base = &ZvbiCaptureBufTypeDef,
     .tp_iter = (getiterfunc) ZvbiCaptureSlicedBuf_Iter,
     .tp_iternext = (iternextfunc) ZvbiCaptureSlicedBuf_IterNext,
+    .tp_as_mapping = &ZvbiCaptureSlicedBufMappingDef,
 };
 
 // ---------------------------------------------------------------------------
