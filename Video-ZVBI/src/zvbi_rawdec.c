@@ -134,13 +134,13 @@ ZvbiRawDec_init(ZvbiRawDecObj *self, PyObject *args, PyObject *kwds)
 {
     static char * kwlist[] = {"par", NULL};
     int RETVAL = -1;
-    PyObject * obj;
+    PyObject * obj = NULL;
 
-    if (PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &obj)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &obj)) {
         return -1;
     }
 
-    if (PyObject_IsSubclass(obj, (PyObject*)&ZvbiCaptureTypeDef) == 1) {
+    if (PyObject_IsInstance(obj, (PyObject*)&ZvbiCaptureTypeDef) == 1) {
         vbi_capture * p_cap = ZvbiCapture_GetCtx(obj);
         vbi_raw_decoder * p_par = vbi_capture_parameters(p_cap);
         if (p_par != NULL) {
@@ -162,7 +162,7 @@ ZvbiRawDec_init(ZvbiRawDecObj *self, PyObject *args, PyObject *kwds)
             PyErr_SetString(ZvbiRawDecError, "failed to get capture parameters from Capture object");
         }
     }
-    else if (PyObject_IsSubclass(obj, (PyObject*)&PyDict_Type) == 1) {
+    else if (PyObject_IsInstance(obj, (PyObject*)&PyDict_Type) == 1) {
         ZvbiRawDec_Dict2Par(obj, &self->rd);
         RETVAL = 0;
     }
@@ -264,16 +264,17 @@ ZvbiRawDec_resize(ZvbiRawDecObj *self, PyObject *args)
 static PyObject *
 ZvbiRawDec_decode(ZvbiRawDecObj *self, PyObject *args)
 {
-    PyObject * obj;
+    PyObject * obj = NULL;
+    double timestamp = 0.0;
 
-    if (!PyArg_ParseTuple(args, "O", &obj)) {
+    if (!PyArg_ParseTuple(args, "O|d", &obj, &timestamp)) {
         return NULL;
     }
 
     uint8_t * p_raw = NULL;
     size_t raw_buf_size = 0;
 
-    if (PyObject_IsSubclass(obj, (PyObject*)&ZvbiCaptureRawBufTypeDef) == 1) {
+    if (PyObject_IsInstance(obj, (PyObject*)&ZvbiCaptureRawBufTypeDef) == 1) {
         vbi_capture_buffer * p_raw_buf = ZvbiCaptureBuf_GetBuf(obj);
         if (p_raw_buf != NULL) {
             raw_buf_size = p_raw_buf->size;
@@ -283,7 +284,7 @@ ZvbiRawDec_decode(ZvbiRawDecObj *self, PyObject *args)
             PyErr_SetString(ZvbiRawDecError, "Raw capture buffer contains no data");
         }
     }
-    else if (PyObject_IsSubclass(obj, (PyObject*)&PyBytes_Type) == 1) {
+    else if (PyObject_IsInstance(obj, (PyObject*)&PyBytes_Type) == 1) {
         p_raw = (uint8_t*) PyBytes_AsString(obj);
         raw_buf_size = PyBytes_Size(obj);
     }
@@ -294,19 +295,19 @@ ZvbiRawDec_decode(ZvbiRawDecObj *self, PyObject *args)
 
     if (p_raw != NULL) {
         size_t raw_size = (self->rd.count[0] + self->rd.count[1]) * self->rd.bytes_per_line;
-        size_t sliced_size = (self->rd.count[0] + self->rd.count[1]) * sizeof(vbi_sliced);
         if (raw_buf_size >= raw_size) {
-            RETVAL = PyTuple_New(3);
+            RETVAL = PyTuple_New(2);
             if (RETVAL != NULL) {
-                PyObject * sliced_obj = PyBytes_FromStringAndSize(NULL, sliced_size);
-                if (sliced_obj != NULL) {
-                    vbi_sliced * p_sliced = (vbi_sliced*) PyBytes_AS_STRING(RETVAL);
-
+                size_t size_sliced = (self->rd.count[0] + self->rd.count[1]) * sizeof(vbi_sliced);
+                vbi_sliced * p_sliced = (vbi_sliced*) PyMem_Malloc(size_sliced);
+                if (p_sliced != NULL) {
                     int nof_lines = vbi_raw_decode(&self->rd, p_raw, p_sliced);
+
                     PyTuple_SetItem(RETVAL, 0, PyLong_FromLong(nof_lines));
-                    PyTuple_SetItem(RETVAL, 1, sliced_obj);
+                    PyTuple_SetItem(RETVAL, 1, ZvbiCaptureSlicedBuf_FromData(p_sliced, nof_lines, timestamp));
                 }
                 else {
+                    PyErr_SetString(ZvbiRawDecError, "Failed to allocate memory for sliced buffer");
                     Py_DECREF(RETVAL);
                 }
             }

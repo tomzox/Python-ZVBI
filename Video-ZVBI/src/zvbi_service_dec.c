@@ -103,6 +103,7 @@ ZvbiServiceDec_decode(ZvbiServiceDecObj *self, PyObject *args)
         if ((sliced_buffer != NULL) && (sliced_buffer->data != NULL)) {
             vbi_sliced * p_sliced = sliced_buffer->data;
             int n_lines = sliced_buffer->size / sizeof(vbi_sliced);
+            // FIXME should be valid lines only
 
             vbi_decode(self->ctx, p_sliced, n_lines, sliced_buffer->timestamp);
             Py_INCREF(Py_None);
@@ -132,6 +133,7 @@ ZvbiServiceDec_decode_bytes(ZvbiServiceDecObj *self, PyObject *args)
         else {
             PyErr_SetString(ZvbiServiceDecError, "Buffer too short for given number of lines");
         }
+        PyBuffer_Release(&in_buf);
     }
     return RETVAL;
 }

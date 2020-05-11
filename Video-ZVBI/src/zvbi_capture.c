@@ -116,13 +116,9 @@ ZvbiCapture_init(ZvbiCaptureObj *self, PyObject *args, PyObject *kwds)
     }
 #endif
     else {
-        // note also works with default value 0 for PID (can be set later using dvb_filter)
-        self->ctx = vbi_capture_dvb_new2(dev_name, dvb_pid, &errorstr, trace);
+        // FIXME V4L2 must be done first as DVB open also works on V4L2 device but not vice-versa
+        self->ctx = vbi_capture_v4l2_new(dev_name, buffers, &self->services, strict, &errorstr, trace);
 
-        if (self->ctx == NULL) {
-            // FIXME free errorstr if not NULL, or concatenate
-            self->ctx = vbi_capture_v4l2_new(dev_name, buffers, &self->services, strict, &errorstr, trace);
-        }
 #if 0  /* obsolete */
         if (self->ctx == NULL) {
             self->ctx = vbi_capture_v4l_new(dev_name, scanning, &self->services, strict, &errorstr, trace);
@@ -132,6 +128,12 @@ ZvbiCapture_init(ZvbiCaptureObj *self, PyObject *args, PyObject *kwds)
             // FIXME free errorstr if not NULL, or concatenate
             self->ctx = vbi_capture_bktr_new(dev_name, scanning, &self->services, strict, &errorstr, trace);
         }
+        if (self->ctx == NULL) {
+            // note also works with default value 0 for PID (can be set later using dvb_filter)
+            // FIXME free errorstr if not NULL, or concatenate
+            self->ctx = vbi_capture_dvb_new2(dev_name, dvb_pid, &errorstr, trace);
+        }
+
     }
     if (self->ctx == NULL) {
         PyErr_SetString(ZvbiCaptureError, errorstr ? errorstr : "unknown error");

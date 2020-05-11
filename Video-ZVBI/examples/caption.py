@@ -240,7 +240,7 @@ def init_window():
     global pgno
 
     tk = Tk()
-    tk.wm_title('Sliced data decoder')
+    tk.wm_title('Caption decoder')
 
     pgno = IntVar(tk, 1)
 
@@ -259,7 +259,7 @@ def init_window():
                     background=COLORKEY,
                     height=DISP_HEIGHT, width=DISP_WIDTH)
     canvas.pack(side=TOP)
-    canvas.focus()
+    canvas.focus_set()
 
 
 #

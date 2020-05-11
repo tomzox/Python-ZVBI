@@ -21,9 +21,10 @@
 
 import sys
 import math
-import Zvbi
+import argparse
 import tkinter.font as tkf
 from tkinter import *
+import Zvbi
 
 #
 # Global variables
@@ -82,18 +83,15 @@ def cap_init():
     global vtdec
     global tid_polling
 
-    opt_verbose = False
-    if 0:
+    opt.verbose = False
+    if opt.v4l2:
         opt_buf_count = 5
         opt_services = Zvbi.VBI_SLICED_TELETEXT_B
         opt_strict = 0
-        opt_device = "/dev/vbi0"
-        cap = Zvbi.Capture(opt_device, services=opt_services,
-                           buffers=opt_buf_count, strict=opt_strict, trace=opt_verbose)
+        cap = Zvbi.Capture(opt.device, services=opt_services,
+                           buffers=opt_buf_count, strict=opt_strict, trace=opt.verbose)
     else:
-        opt_device = "/dev/dvb/adapter0/demux0"
-        opt_pid = 104
-        cap = Zvbi.Capture(opt_device, dvb_pid=opt_pid, trace=opt_verbose)
+        cap = Zvbi.Capture(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
 
     vtdec = Zvbi.ServiceDec()
     vtdec.event_handler_register(Zvbi.VBI_EVENT_TTX_PAGE, pg_handler)
@@ -317,22 +315,36 @@ def gui_init():
 
     # canvas for displaying the teletext page as image
     canvas = Canvas(tk, borderwidth=0, relief='flat', background='#000000')
-    canvas.bindtags([canvas, 'all'])
+    canvas.bindtags([canvas, 'all'])  # remove widget default bindings
     canvas.bind('<Key-q>', lambda e: sys.exit(0))
     canvas.bind('<Button-1>', lambda e: pg_link(e.x, e.y))
     canvas.pack(fill=BOTH)
-    canvas.focus()
+    canvas.focus_set()
 
     redraw = False
 
-# create & display GUI
-gui_init()
+def ParseCmdOptions():
+    parser = argparse.ArgumentParser(description="Plotter of captured raw VBI data")
+    parser.add_argument("-d", "--device", type=str, default="/dev/dvb/adapter0/demux0")
+    parser.add_argument(      "--pid", type=int, default=104)
+    parser.add_argument(      "--v4l2", action='store_true', default=False)
+    parser.add_argument(      "--pal", action='store_true', default=False)
+    parser.add_argument(      "--ntsc", action='store_true', default=False)
+    parser.add_argument("-v", "--verbose", action='count', default=0)
+    return parser.parse_args()
 
-# start capturing teletext
-cap_init()
+def main_func():
+    # create & display GUI
+    gui_init()
 
-# everything from here on is event driven
-try:
-    tk.mainloop()
-except KeyboardInterrupt:
-    pass
+    # start capturing teletext
+    cap_init()
+
+    # everything from here on is event driven
+    try:
+        tk.mainloop()
+    except KeyboardInterrupt:
+        pass
+
+opt = ParseCmdOptions()
+main_func()

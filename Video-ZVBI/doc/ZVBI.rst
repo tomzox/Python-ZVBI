@@ -149,13 +149,13 @@ This class is used for opening a DVB or analog "VBI" device and start
 receiving data from it.  The class does not support tuning of a channel.
 
 The constructor creates a capture context with the given parameters.
-Afterward, the read, pull method have to be called frequently for
-retrieving the data. Usually this is done within a quasi-infinite "while"
-loop (possibly in a separate thread), but most devices will support
-"select()" and thus allow asynchronous I/O via event handlers. If
-everything else fails, you can also use polling in fixed intervals
-slightly lower than the (interlaced) video frame rate (e.g. 2*30 Hz
-for NTSC, 2*25 Hz for PAL)
+Afterward, one of the *read* or *pull* methods (see below for hints which
+one to use) have to be called periodically for retrieving the data.
+Usually this is done within a quasi-infinite "while" loop (possibly in a
+separate thread), but most devices will support "select()" and thus allow
+asynchronous I/O via event handlers. If everything else fails, you can
+also use polling in fixed intervals slightly lower than the (interlaced)
+video frame rate (e.g. 2*30 Hz for NTSC, 2*25 Hz for PAL)
 
 The context is automatically deleted and the device closed when the object
 is destroyed.
@@ -165,9 +165,9 @@ Upon failure, the constructor and all member functions raise exception
 exception types may be used for specific error cases.)
 
 There are two different types of capture functions: The functions named
-`read...` copy captured data into a bytes object (where the copying is
+*read* copy captured data into a bytes object (where the copying is
 usually done at device driver level). In contrast the functions named
-`pull...` leave the data in internal buffers inside the capture context
+*pull* leave the data in internal buffers inside the capture context
 and just return a reference to this buffer. Usually this allows the device
 driver to avoid any copying, however not all devices support this (e.g.
 the Linux DVB driver does not support, i.e. there is no difference in
@@ -307,17 +307,26 @@ Zvbi.Capture.read_raw()
 
 ::
 
-    cap.read_raw(raw_buf, timestamp, timeout_ms)
+    cap_data = cap.read_raw(timeout_ms)
 
-Read a raw VBI frame from the capture device into scalar *raw_buf*.
-The buffer variable is automatically extended to the exact length
-required for the frame's data.  On success, the function returns
-in *timestamp* the capture instant in seconds and fractions
-since 1970-01-01 00:00 in double format.
+Read a raw VBI frame from the capture device and return it within an
+object of type *ZvbiCapture.Result*, which is a named tuple with the
+following elements:
+
+0. *timestamp*: Timestamp indicating when the data was captured; the
+   timestamp is the number of seconds and fractions since 1970-01-01 00:00
+   of type *float*
+1. *sliced_lines*: Always set to zero here.
+2. *raw_buffer*: Bytes object consecutively containing raw data of all
+   captured VBI lines. (Length of a line can be queried via method
+   `Zvbi.Capture.parameters()`_: element *bytes_per_line*.)
+3. *sliced_buffer*: Always set to *None* here.
 
 Parameter *timeout_ms* gives the limit for waiting for data in
 milliseconds; if no data arrives within the timeout, the function
-returns 0.  Note the function may fail if the device does not support
+raises exception *Zvbi.CaptureError* with text indicating timeout.
+The same exception is raised upon error indications from the device.
+Note the function may fail if the device does not support
 reading data in raw format.
 
 Zvbi.Capture.read_sliced()
@@ -325,19 +334,30 @@ Zvbi.Capture.read_sliced()
 
 ::
 
-    cap.read_sliced(sliced_buf, n_lines, timestamp, timeout_ms)
+    cap_data = cap.read_sliced(timeout_ms)
 
-Read a sliced VBI frame from the capture context into scalar
-*sliced_buf*.  The buffer is automatically extended to the length
-required for the sliced data.  Parameter *timeout_ms* specifies the
-limit for waiting for data (in milliseconds.)
+Read a sliced VBI frame from the capture context and return it within an
+object of type *ZvbiCapture.Result*, which is a named tuple with the
+following elements:
 
-On success, the function returns in *timestamp* the capture instant
-in seconds and fractions since 1970-01-01 00:00 in double format and
-in *n_lines* the number of sliced lines in the buffer. Note for
-efficiency the buffer is an array of vbi_sliced C structures. Use
-*get_sliced_line()* to process the contents in Perl, or pass the buffer
-directly to class `Zvbi.ServiceDec`_ or other decoder objects.
+0. *timestamp*: Timestamp indicating when the data was captured; the
+   timestamp is the number of seconds and fractions since 1970-01-01 00:00
+   of type *float*
+1. *sliced_lines*: Number of valid lines in the sliced buffer
+2. *raw_buffer*: Always set o *None* here
+3. *sliced_buffer*: Object of type *CaptureSlicedBuf*, containing data
+   data of sliced lines. For efficiency the data is stored internally
+   within a C structure, but can be accessed by Python either by using an
+   iterator, or by sub-scripting with indices in range
+   `[0 : cap_data.sliced_lines]`. However usually one just transparetnly
+   forwards the *sliced_buffer* to `Zvbi.ServiceDec.decode()`_.
+
+Parameter *timeout_ms* gives the limit for waiting for data in
+milliseconds; if no data arrives within the timeout, the function
+raises exception *Zvbi.CaptureError* with text indicating timeout.
+The same exception is raised upon error indications from the device.
+Note the function may fail if the device does not support
+reading data in raw format.
 
 Note: it's generally more efficient to use *pull_sliced()*
 instead, as that one may avoid having to copy sliced data into the
@@ -348,85 +368,162 @@ Zvbi.Capture.read()
 
 ::
 
-    cap.read(raw_buf, sliced_buf, n_lines, timestamp, timeout_ms)
+    cap_data = cap.read(timeout_ms)
 
 This function is a combination of *read_raw()* and *read_sliced()*, i.e.
-reads a raw VBI frame from the capture context into *raw_buf* and
-decodes it to sliced data which is returned in *sliced_buf*. For
-details on parameters see above.
+reads a VBI frame from the capture context and returns both the raw data
+and the results of "slicing" the raw data. The results are stored in an
+object of type *ZvbiCapture.Result*, which is a named tuple with the
+following elements:
+
+0. *timestamp*: Timestamp indicating when the data was captured; the
+   timestamp is the number of seconds and fractions since 1970-01-01 00:00
+   of type *float*
+1. *sliced_lines*: Number of valid lines in the sliced buffer
+2. *raw_buffer*: Bytes object consecutively containing raw data of all
+   captured VBI lines. (Length of a line can be queried via method
+   `Zvbi.Capture.parameters()`_: element *bytes_per_line*.)
+   The element may also be *None* if the driver does not support raw data
+   (e.g. DVB devices)
+3. *sliced_buffer*: Object of type *CaptureSlicedBuf*, containing data
+   data of sliced lines. For efficiency the data is stored internally
+   within a C structure, but can be accessed by Python either by using an
+   iterator, or by sub-scripting with indices in range
+   `[0 : cap_data.sliced_lines]`. However usually one just transparetnly
+   forwards the *sliced_buffer* to `Zvbi.ServiceDec.decode()`_.
 
 Note: Depending on the driver, captured raw data may have to be copied
 from the capture buffer into the given buffer (e.g. for v4l2 streams which
 use memory mapped buffers.)  It's generally more efficient to use one of
-the following "pull" interfaces, especially if you don't require access
-to raw data at all.
+the following "pull" interfaces. Also, if you don't require raw data it's
+even more efficient to use *pull_sliced()* or *read_sliced()*.
 
 Zvbi.Capture.pull_raw()
 -----------------------
 
 ::
 
-    cap.pull_raw(ref, timestamp, timeout_ms)
+    cap_data = cap.pull_raw(timeout_ms)
 
 Read a raw VBI frame from the capture context, which is returned in
-*ref* in form of a blessed reference to an internal buffer.  The data
-remains valid until the next call to this or any other "pull" function.
-The reference can be passed to the raw decoder function.  If you need to
-process the data in Perl, use *read_raw()* instead.  For all other cases
-*read_raw()* is more efficient as it may avoid copying the data.
+form of an object of type *ZvbiCapture.Result*. **Note**: The returned
+*raw_buffer* remains valid only until the next call to this or any other
+*pull* function.
 
-On success, the function returns in *timestamp* the capture instant in
-seconds and fractions since 1970-01-01 00:00 in double format.  Parameter
-*timeout_ms* specifies the limit for waiting for data (in milliseconds.)
-Note the function may fail if the device does not support reading data
-in raw format.
+The result of type *ZvbiCapture.Result* is a named tuple with the
+following elements:
+
+0. *timestamp*: Timestamp indicating when the data was captured; the
+   timestamp is the number of seconds and fractions since 1970-01-01 00:00
+   of type *float*
+1. *sliced_lines*: Always set to zero here.
+2. *raw_buffer*: Object of type *Zvbi.CaptureRawBuf*, encapsulating a
+   reference to an internal buffer containing captured raw data.
+3. *sliced_buffer*: Always set to *None* here.
+
+The *raw_buffer* can be passed to `Zvbi.RawDec.decode()`_.  If you
+need to process the data by Python code, use `Zvbi.Capture.read_raw()`_
+instead.  (When processing raw data, *read_raw()* is more efficient as it
+may avoid copying the data out of the internal buffer into a Python
+object.)
+
+Parameter *timeout_ms* gives the limit for waiting for data in
+milliseconds; if no data arrives within the timeout, the function
+raises exception *Zvbi.CaptureError* with text indicating timeout.
+The same exception is raised upon error indications from the device.
+Note the function may fail if the device does not support
+reading data in raw format.
+
 
 Zvbi.Capture.pull_sliced()
 --------------------------
 
 ::
 
-    cap.pull_sliced(ref, n_lines, timestamp, timeout_ms)
+    cap_data = cap.pull_sliced(timeout_ms)
 
 Read a sliced VBI frame from the capture context, which is returned in
-*ref* in form of a blessed reference to an internal buffer. The data
-remains valid until the next call to this or any other "pull" function.
-The reference can be passed to *get_sliced_line()* to process the data in
-Perl, or it can be passed to a `Zvbi.ServiceDec`_ decoder object.
+form of an object of type *ZvbiCapture.Result*. **Note**: The returned
+*sliced_buffer* remains valid only until the next call to this or any
+other *pull* function.
 
-On success, the function returns in *timestamp* the capture instant
-in seconds and fractions since 1970-01-01 00:00 in double format and
-in *n_lines* the number of sliced lines in the buffer.  Parameter
-*timeout_ms* specifies the limit for waiting for data (in milliseconds.)
+Read a sliced VBI frame from the capture context, which is returned in
+*ref* in form of a blessed reference to an internal buffer.
+
+The result of type *ZvbiCapture.Result* is a named tuple with the
+following elements:
+
+0. *timestamp*: Timestamp indicating when the data was captured; the
+   timestamp is the number of seconds and fractions since 1970-01-01 00:00
+   of type *float*
+1. *sliced_lines*: Number of valid lines in the sliced buffer
+2. *raw_buffer*: Always set to *None* here.
+3. *sliced_buffer*: Object of type *CaptureSlicedBuf*, encapsulating a
+   reference to an internal buffer containing sliced data.
+   The data can be accessed by Python either by using an
+   iterator, or by sub-scripting with indices in range
+   `[0 : cap_data.sliced_lines]`. However usually one just transparetnly
+   forwards the *sliced_buffer* to `Zvbi.ServiceDec.decode()`_.
+
+Parameter *timeout_ms* gives the limit for waiting for data in
+milliseconds; if no data arrives within the timeout, the function
+raises exception *Zvbi.CaptureError* with text indicating timeout.
+The same exception is raised upon error indications from the device.
+Note the function may fail if the device does not support
+reading data in raw format.
 
 Zvbi.Capture.pull()
 -------------------
 
 ::
 
-    cap.pull(raw_ref, sliced_ref, sliced_lines, timestamp, timeout_ms)
+    cap_data = cap.pull(timeout_ms)
 
 This function is a combination of *pull_raw()* and *pull_sliced()*, i.e.
-returns blessed references to an internal raw data buffer in *raw_ref*
-and to a sliced data buffer in *sliced_ref*. For details on parameters
-see above.
+reads a VBI frame from the capture context and returns both the raw data
+and the results of "slicing" the raw data.  **Note**: The returned
+*raw_buffer* and *sliced_buffer* remain valid only until the next call to
+this or any other *pull* function.
 
-The following control functions work as described in the libzvbi
-documentation.
+The function returns an object of type *ZvbiCapture.Result*, which is a
+named tuple with the following elements:
+
+0. *timestamp*: Timestamp indicating when the data was captured; the
+   timestamp is the number of seconds and fractions since 1970-01-01 00:00
+   of type *float*
+1. *sliced_lines*: Number of valid lines in the sliced buffer
+2. *raw_buffer*: Object of type *Zvbi.CaptureRawBuf*, encapsulating a
+   reference to an internal buffer containing captured raw data.
+   The element may also be *None* if the driver does not support raw data
+   (e.g. DVB devices)
+3. *sliced_buffer*: Object of type *CaptureSlicedBuf*, encapsulating a
+   reference to an internal buffer containing sliced data.
+   The data can be accessed by Python either by using an
+   iterator, or by sub-scripting with indices in range
+   `[0 : cap_data.sliced_lines]`. However usually one just transparetnly
+   forwards the *sliced_buffer* to `Zvbi.ServiceDec.decode()`_.
+
+Parameter *timeout_ms* gives the limit for waiting for data in
+milliseconds; if no data arrives within the timeout, the function
+raises exception *Zvbi.CaptureError* with text indicating timeout.
+The same exception is raised upon error indications from the device.
+Note the function may fail if the device does not support
+reading data in raw format.
 
 Zvbi.Capture.parameters()
 -------------------------
 
 ::
 
-    cap.parameters()
+    params = cap.parameters()
 
 Returns a dict object describing the physical parameters of the VBI
 source.  This object can be used to initialize the raw decoder context
 described below.
 
 **Note**: For DVB devices this function only returns dummy parameters, as
-no "raw decoding" is performed in this case.
+no "raw decoding" is performed in this case. In particular the sampling
+format will be zero, which is an invalid value.
 
 The dict has the following members:
 
@@ -435,7 +532,7 @@ scanning:
     line system all line numbers refer to.
 
 sampling_format:
-    Format of the raw VBI data.
+    Format of the raw VBI data (`VBI_PIXFMT_YUV420` et.al.)
 
 sampling_rate:
     Sampling rate in Hz, the number of samples or pixels captured per second.
