@@ -21,6 +21,7 @@
 #include "zvbi_capture.h"
 #include "zvbi_capture_buf.h"
 #include "zvbi_raw_dec.h"
+#include "zvbi_raw_params.h"
 #include "zvbi_service_dec.h"
 #include "zvbi_page.h"
 #include "zvbi_export.h"
@@ -563,6 +564,7 @@ PyInit_Zvbi(void)
     if ((PyInit_Capture(module, ZvbiError) < 0) ||
         (PyInit_Proxy(module, ZvbiError) < 0) ||
         (PyInit_RawDec(module, ZvbiError) < 0) ||
+        (PyInit_RawParams(module, ZvbiError) < 0) ||
         (PyInit_CaptureBuf(module, ZvbiError) < 0) ||
         (PyInit_ServiceDec(module, ZvbiError) < 0) ||
         (PyInit_Page(module, ZvbiError) < 0) ||

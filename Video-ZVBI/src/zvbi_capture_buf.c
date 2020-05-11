@@ -105,7 +105,8 @@ Py_ssize_t ZvbiCaptureSlicedBuf_MappingLength(ZvbiCaptureBufObj * self)
 
     vbi_capture_buffer * p_sliced_buf = self->buf;
     if (p_sliced_buf != NULL) {
-        // FIXME should use "n_lines"
+        // note "size" element was calculated from "n_lines" slicer result
+        // (i.e. not the allocated buffer size, which may be larger)
         result = p_sliced_buf->size / sizeof(vbi_sliced);
     }
     return result;
@@ -124,7 +125,8 @@ PyObject * ZvbiCaptureSlicedBuf_MappingSubscript(ZvbiCaptureBufObj * self, PyObj
     if (idx >= 0) {
         vbi_capture_buffer * p_sliced_buf = self->buf;
         if (p_sliced_buf != NULL) {
-            // FIXME should use "n_lines"
+            // note "size" element was calculated from "n_lines" slicer result
+            // (i.e. not the allocated buffer size, which may be larger)
             max_lines = p_sliced_buf->size / sizeof(vbi_sliced);
             p_sliced = p_sliced_buf->data;
         }
@@ -206,27 +208,33 @@ vbi_capture_buffer * ZvbiCaptureBuf_GetBuf(PyObject * self)
 PyObject * ZvbiCaptureRawBuf_FromPtr(vbi_capture_buffer * ptr)
 {
     PyObject * self = ZvbiCaptureBuf_new(&ZvbiCaptureRawBufTypeDef, NULL, NULL);
-    ((ZvbiCaptureBufObj*)self)->buf = ptr;
-    ((ZvbiCaptureBufObj*)self)->need_free = FALSE;
+    if (self != NULL) {
+        ((ZvbiCaptureBufObj*)self)->buf = ptr;
+        ((ZvbiCaptureBufObj*)self)->need_free = FALSE;
+    }
     return self;
 }
 
 PyObject * ZvbiCaptureSlicedBuf_FromPtr(vbi_capture_buffer * ptr)
 {
     PyObject * self = ZvbiCaptureBuf_new(&ZvbiCaptureSlicedBufTypeDef, NULL, NULL);
-    ((ZvbiCaptureBufObj*)self)->buf = ptr;
-    ((ZvbiCaptureBufObj*)self)->need_free = FALSE;
+    if (self != NULL) {
+        ((ZvbiCaptureBufObj*)self)->buf = ptr;
+        ((ZvbiCaptureBufObj*)self)->need_free = FALSE;
+    }
     return self;
 }
 
 PyObject * ZvbiCaptureSlicedBuf_FromData(vbi_sliced * data, int n_lines, double timestamp)
 {
     ZvbiCaptureBufObj * self = (ZvbiCaptureBufObj*) ZvbiCaptureBuf_new(&ZvbiCaptureSlicedBufTypeDef, NULL, NULL);
-    self->buf = PyMem_RawMalloc(sizeof(vbi_capture_buffer));
-    self->buf->data = data;
-    self->buf->size = n_lines * sizeof(vbi_sliced);
-    self->buf->timestamp = timestamp;
-    self->need_free = TRUE;
+    if (self != NULL) {
+        self->buf = PyMem_RawMalloc(sizeof(vbi_capture_buffer));
+        self->buf->data = data;
+        self->buf->size = n_lines * sizeof(vbi_sliced);
+        self->buf->timestamp = timestamp;
+        self->need_free = TRUE;
+    }
     return (PyObject*) self;
 }
 

@@ -11,9 +11,13 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-#if !defined (_PY_ZVBI_RAW_DEC_H)
-#define _PY_ZVBI_RAW_DEC_H
+#if !defined (_PY_ZVBI_RAW_PARAMS_H)
+#define _PY_ZVBI_RAW_PARAMS_H
 
-int PyInit_RawDec(PyObject * module, PyObject * error_base);
+extern PyTypeObject ZvbiRawParamsTypeDef;
+vbi_raw_decoder * ZvbiRawParamsGetStruct(PyObject * self);
+PyObject * ZvbiRawParamsFromStruct(const vbi_raw_decoder * par);
 
-#endif  /* _PY_ZVBI_RAW_DEC_H */
+int PyInit_RawParams(PyObject * module, PyObject * error_base);
+
+#endif  /* _PY_ZVBI_RAW_PARAMS_H */

@@ -162,18 +162,18 @@ def draw(v=None):
     draw_pgm()
 
     if (draw_row.get() >= 0) and (draw_row.get() < src_h):
-        field = (draw_row.get() >= par['count_a'])
+        field = (draw_row.get() >= par.count_a)
 
-        if (par['start_a'] if (field == 0) else par['start_b']) < 0:
+        if (par.start_a if (field == 0) else par.start_b) < 0:
             nchars = ("Row %d Line ? - " % draw_row.get())
             phys_line = -1
 
         elif field == 0:
-            phys_line = draw_row.get() + par['start_a']
+            phys_line = draw_row.get() + par.start_a
             nchars = ("Row %d Line %d - " % (draw_row.get(), phys_line))
 
         else:
-            phys_line = draw_row.get() - par['count_a'] + par['start_b']
+            phys_line = draw_row.get() - par.count_a + par.start_b
             nchars = ("Row %d Line %d - " % (draw_row.get(), phys_line))
 
         slines, sliced_data = rawdec.decode(raw1)
@@ -391,14 +391,15 @@ def main_func():
     rawdec.add_services(services, opt_strict)
 
     par = cap.parameters()
-    if not par['sampling_format'] == Zvbi.VBI_PIXFMT_YUV420:
-        print(("unexpected sampling format:%d\n" +
-               "likely the device does not support capturing raw data")
-                % par['sampling_format'])
+    if not par.sampling_format == Zvbi.VBI_PIXFMT_YUV420:
+        print(("Unexpected sampling format:%d\n" +
+               "In raw decoder parameters: %s\n" +
+               "Likely the device does not support capturing raw data")
+                % (par.sampling_format, str(par)))
         sys.exit(1)
 
-    src_w = par['bytes_per_line']
-    src_h = par['count_a'] + par['count_b']
+    src_w = par.bytes_per_line
+    src_h = par.count_a + par.count_b
 
     init_window()
 

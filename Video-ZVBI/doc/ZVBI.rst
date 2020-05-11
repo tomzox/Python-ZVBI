@@ -67,18 +67,21 @@ structured into classes, and how the classes are connected:
     both for raw and sliced data, which are distinguished by use of
     sub-classes *CaptureRawBuf* and *CaptureSlicedBuf*.
 `Zvbi.RawDec`_
-    This class can optionally be used for manual "slicing" raw data,
+    This class can optionally be used for manual processing raw data (i.e.
+    direct output of the analog-to-digital conversion of the video signal)
     optionally returned by the *Capture* class via *pull_raw()* methods
-    et.al. For most cases the slicing done under control of the *Capture*
-    class using *pull_sliced()* should be sufficient however. This class
-    is not applicable for DVB.
+    et.al. For most cases the processing (so-called "slicing") done under
+    control of the *Capture* class using *pull_sliced()* should be
+    sufficient, so this class is usually not needed. This class is not
+    applicable for DVB.
 `Zvbi.Proxy`_
     This class allows accessing VBI devices via a proxy daemon. An instance
     of this class would be provided to the *Capture* class constructor.
     Using the proxy instead of capturing directly from a VBI device allows
     multiple applications to capture concurrently (e.g. for decoding multiple
-    data services). Not applicable to DVB, as the proxy does not support
-    DVB devices.
+    data services). Not applicable to DVB, as DVB drivers usually allow
+    capturing by multiple applications concurrently, so the proxy does not
+    support DVB.
 `Zvbi.ServiceDec`_
     Class performing high level decoding of all supported services and storing
     the data in an internal cache. The class takes input ("sliced data") from
@@ -271,11 +274,11 @@ Note the PID value can usually be derived from the PID for video in
                        buffers=opt_buf_count, trace=opt_verbose)
 
 **Capturing from an analog capture card via proxy**:
-Whenever possible the proxy should be used instead of opening the device
-directly, since it allows the user to start multiple VBI clients in
-parallel.  When this function fails (usually because the user hasn't
-started the proxy daemon) applications should automatically fall back
-to opening the device directly. ::
+Whenever possible, the proxy should be used instead of opening analog
+devices directly, since it allows the user to start multiple VBI clients
+concurrently. When this function fails (usually because the user hasn't
+started the proxy daemon) applications should automatically fall back to
+opening the device directly. ::
 
     opt_device = "/dev/vbi0"
     opt_services = Zvbi.VBI_SLICED_TELETEXT_B
@@ -319,7 +322,7 @@ following elements:
 1. *sliced_lines*: Always set to zero here.
 2. *raw_buffer*: Bytes object consecutively containing raw data of all
    captured VBI lines. (Length of a line can be queried via method
-   `Zvbi.Capture.parameters()`_: element *bytes_per_line*.)
+   `Zvbi.Capture.parameters()`_: attribute *bytes_per_line*.)
 3. *sliced_buffer*: Always set to *None* here.
 
 Parameter *timeout_ms* gives the limit for waiting for data in
@@ -382,7 +385,7 @@ following elements:
 1. *sliced_lines*: Number of valid lines in the sliced buffer
 2. *raw_buffer*: Bytes object consecutively containing raw data of all
    captured VBI lines. (Length of a line can be queried via method
-   `Zvbi.Capture.parameters()`_: element *bytes_per_line*.)
+   `Zvbi.Capture.parameters()`_: attribute *bytes_per_line*.)
    The element may also be *None* if the driver does not support raw data
    (e.g. DVB devices)
 3. *sliced_buffer*: Object of type *CaptureSlicedBuf*, containing data
@@ -517,58 +520,20 @@ Zvbi.Capture.parameters()
 
     params = cap.parameters()
 
-Returns a dict object describing the physical parameters of the VBI
-source.  This object can be used to initialize the raw decoder context
-described below.
+Returns an instance of class `Zvbi.RawParams`_ describing the physical
+parameters of the VBI source. See the description of that class for a
+description of attributes.
+
+Modifying the attributes of the returned object has no effect on the
+*Capture* instance. To control raw decoding, pass the returned (and
+possibly modified) parameters when instantiating class `Zvbi.RawDec`_ and
+then use that class for decoding instead of the *sliced_buffer* output of
+the *Capture* member functions.
 
 **Note**: For DVB devices this function only returns dummy parameters, as
 no "raw decoding" is performed in this case. In particular the sampling
-format will be zero, which is an invalid value.
-
-The dict has the following members:
-
-scanning:
-    Either 525 (M/NTSC, M/PAL) or 625 (PAL, SECAM), describing the scan
-    line system all line numbers refer to.
-
-sampling_format:
-    Format of the raw VBI data (`VBI_PIXFMT_YUV420` et.al.)
-
-sampling_rate:
-    Sampling rate in Hz, the number of samples or pixels captured per second.
-
-bytes_per_line:
-    Number of samples or pixels captured per scan line, in bytes. This
-    determines the raw VBI image width and you want it large enough to
-    cover all data transmitted in the line (with headroom).
-
-offset:
-    The distance from 0H (leading edge hsync, half amplitude point) to
-    the first sample (pixel) captured, in samples (pixels). You want an
-    offset small enough not to miss the start of the data transmitted.
-
-start_a, start_b:
-    First scan line to be captured, first and second field respectively,
-    according to the ITU-R line numbering scheme (see vbi_sliced). Set
-    to zero if the exact line number isn't known.
-
-count_a, count_b:
-    Number of scan lines captured, first and second field respectively.
-    This can be zero if only data from one field is required. The sum
-    count_a + count_b determines the raw VBI image height.
-
-interlaced:
-    In the raw vbi image, normally all lines of the second field are
-    supposed to follow all lines of the first field. When this flag is
-    set, the scan lines of first and second field will be interleaved in
-    memory. This implies count_a and count_b are equal.
-
-synchronous:
-    Fields must be stored in temporal order, i. e. as the lines have been
-    captured. It is assumed that the first field is also stored first in
-    memory, however if the hardware cannot reliable distinguish fields this
-    flag shall be cleared, which disables decoding of data services
-    depending on the field number.
+format will be zero, which is an invalid value, so this can be used for
+detecting this case.
 
 
 Zvbi.Capture.update_services()
@@ -769,9 +734,14 @@ Creates and initializes a new raw decoder context. Parameter *ref*
 specifies the physical parameters of the raw VBI image, such as the
 sampling rate, number of VBI lines etc.  The parameter can be either
 a reference to a capture context (`Zvbi.Capture`_)
-or a reference to a dict. The contents for the dict are as returned
-by method `Zvbi.Capture.parameters()`_ on capture contexts, i.e. they
-describe the physical parameters of the source.
+or raw capture parameters of type `Zvbi.RawParams`_. (See description of
+that class for a list of attributes.)
+
+A properly initialized instance of *Zvbi.RawParams* can be obtained either
+via method `Zvbi.Capture.parameters()`_ or `Zvbi.RawDec.parameters()`_.
+In case an instance of `Zvbi.Capture`_ is used as parameter to the
+constructor, decoder parameters are retrieved internally using
+`Zvbi.Capture.parameters()` for convenience.
 
 Zvbi.RawDec.parameters()
 ------------------------
@@ -813,8 +783,8 @@ The function returns a tuple containing the following three results:
    twice as high; attribute `sampling_rate` will be set by libzvbi to a more
    reasonable value of 27 MHz derived from ITU-R Rec. 601.)
 
-2. A dict which is filled with calculated sampling
-   parameters. The content is equivalent to that returned by
+2. An instance of class `Zvbi.RawParams`_ which contains the calculated
+   sampling parameters. The content is described as for function
    `Zvbi.Capture.parameters()`_
 
 Zvbi.RawDec.reset()
@@ -924,6 +894,68 @@ Upon errors the function raises exception *Zvbi.RawDecError*.
 Note this function attempts to learn which lines carry which data
 service, or none, to speed up decoding.  Hence you must use different
 raw decoder contexts for different devices.
+
+
+.. _Zvbi.RawParams:
+
+Class Zvbi.RawParams
+====================
+
+This is a simple parameter container, encapsulating parameters of raw
+captured data (i.e. *raw_buffer* result produced by methods
+*Zvbi.Capture.read_raw()* et.al.), or for instantiating a raw decoder
+of class `Zvbi.RawDec`_.
+
+The class has the following attributes:
+
+scanning:
+    Either 525 (M/NTSC, M/PAL) or 625 (PAL, SECAM), describing the scan
+    line system all line numbers refer to.
+
+sampling_format:
+    Format of the raw VBI data (one of the `VBI_PIXFMT_*` constants,
+    e.g. `VBI_PIXFMT_YUV420`; see enum *vbi_pixfmt*)
+
+sampling_rate:
+    Sampling rate in Hz (i.e. the number of samples or pixels captured
+    per second.)
+
+bytes_per_line:
+    Number of samples or pixels captured per scan line, in bytes. This
+    determines the raw VBI image width and you want it large enough to
+    cover all data transmitted in the line (with headroom).
+
+offset:
+    The distance from 0H (leading edge hsync, half amplitude point) to
+    the first sample (pixel) captured, in samples (pixels). You want an
+    offset small enough not to miss the start of the data transmitted.
+
+start_a, start_b:
+    First scan line to be captured in the first and second half-frame
+    respectively. Numbering is according to the ITU-R line numbering
+    scheme (see *vbi_sliced*). Set to zero if the exact line number isn't
+    known.
+
+count_a, count_b:
+    Number of scan lines captured in the first and second half-frame
+    respectively.  This can be zero if only data from one field is
+    required. The sum `count_a + count_b` determines the raw VBI image
+    height.
+
+interlaced:
+    In the raw vbi image, normally all lines of the second field are
+    supposed to follow all lines of the first field. When this flag is
+    set, the scan lines of first and second field will be interleaved in
+    memory. This implies count_a and count_b are equal.
+
+synchronous:
+    Fields must be stored in temporal order, i. e. as the lines have been
+    captured. It is assumed that the first field is also stored first in
+    memory, however if the hardware cannot reliable distinguish fields this
+    flag shall be cleared, which disables decoding of data services
+    depending on the field number.
+
+
 
 .. _Zvbi.Proxy:
 

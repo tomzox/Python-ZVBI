@@ -20,6 +20,7 @@
 #include "zvbi_capture.h"
 #include "zvbi_proxy.h"
 #include "zvbi_raw_dec.h"
+#include "zvbi_raw_params.h"
 #include "zvbi_capture_buf.h"
 
 // ---------------------------------------------------------------------------
@@ -455,7 +456,7 @@ ZvbiCapture_parameters(ZvbiCaptureObj *self, PyObject *args)
 
     vbi_raw_decoder * p_rd = vbi_capture_parameters(self->ctx);
     if (p_rd != NULL) {
-        RETVAL = ZvbiRawDec_Par2Dict(p_rd);
+        RETVAL = ZvbiRawParamsFromStruct(p_rd);
     }
     else {
         PyErr_SetString(ZvbiCaptureError, "failed to retrieve parameters");

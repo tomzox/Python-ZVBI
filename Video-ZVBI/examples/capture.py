@@ -61,7 +61,7 @@ def dump_pil(pil):
     elif pil == PIL(31, 15, 31, 63):
         print(" PDC: No time")
     else:
-        print(" PDC: %05x, 200X-%02d-%02d %02d:%02d" %
+        print(" PDC: %05x, YYYY-%02d-%02d %02d:%02d" %
               (pil, mon, day, hour, minute))
 
 
@@ -335,8 +335,9 @@ def main_func():
         pass
 
     if opt.pid == -1:
-        if par["sampling_format"] != Zvbi.VBI_PIXFMT_YUV420:
-            print("Unexpected sampling format %d" % par["sampling_format"])
+        if par.sampling_format != Zvbi.VBI_PIXFMT_YUV420:
+            print("Unexpected sampling format:%d in capture parameters"
+                    % par.sampling_format, file=sys.stderr)
             exit(-1)
 
 #X#    if opt.pes:
