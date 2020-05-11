@@ -20,7 +20,7 @@
 #include "zvbi_proxy.h"
 #include "zvbi_capture.h"
 #include "zvbi_capture_buf.h"
-#include "zvbi_rawdec.h"
+#include "zvbi_raw_dec.h"
 #include "zvbi_service_dec.h"
 #include "zvbi_page.h"
 #include "zvbi_export.h"
