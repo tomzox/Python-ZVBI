@@ -19,6 +19,7 @@
 
 #include "zvbi_service_dec.h"
 #include "zvbi_page.h"
+#include "zvbi_event_types.h"
 #include "zvbi_capture_buf.h"
 #include "zvbi_callbacks.h"
 
@@ -319,166 +320,6 @@ ZvbiServiceDec_page_title(ZvbiServiceDecObj *self, PyObject *args)
 //  Event Handling
 // ---------------------------------------------------------------------------
 
-// FIXME use different sub-types for event types;
-// FIXME use named tuple instead of dict
-
-/*
- * Convert event description structs into Perl hashes
- */
-#if 0 // TODO
-static void
-zvbi_xs_aspect_ratio_to_hv( HV * hv, vbi_aspect_ratio * p_asp )
-{
-        hv_store_iv(hv, first_line, p_asp->first_line);
-        hv_store_iv(hv, last_line, p_asp->last_line);
-        hv_store_nv(hv, ratio, p_asp->ratio);
-        hv_store_iv(hv, film_mode, p_asp->film_mode);
-        hv_store_iv(hv, open_subtitles, p_asp->open_subtitles);
-}
-
-static void
-zvbi_xs_prog_info_to_hv( HV * hv, vbi_program_info * p_pi )
-{
-        hv_store_iv(hv, future, p_pi->future);
-        if (p_pi->month != -1) {
-                hv_store_iv(hv, month, p_pi->month);
-                hv_store_iv(hv, day, p_pi->day);
-                hv_store_iv(hv, hour, p_pi->hour);
-                hv_store_iv(hv, min, p_pi->min);
-        }
-        hv_store_iv(hv, tape_delayed, p_pi->tape_delayed);
-        if (p_pi->length_hour != -1) {
-                hv_store_iv(hv, length_hour, p_pi->length_hour);
-                hv_store_iv(hv, length_min, p_pi->length_min);
-        }
-        if (p_pi->elapsed_hour != -1) {
-                hv_store_iv(hv, elapsed_hour, p_pi->elapsed_hour);
-                hv_store_iv(hv, elapsed_min, p_pi->elapsed_min);
-                hv_store_iv(hv, elapsed_sec, p_pi->elapsed_sec);
-        }
-        if (p_pi->title[0] != 0) {
-                hv_store_pv(hv, title, (char*)p_pi->title);
-        }
-        if (p_pi->type_classf != VBI_PROG_CLASSF_NONE) {
-                hv_store_iv(hv, type_classf, p_pi->type_classf);
-        }
-        if (p_pi->type_classf == VBI_PROG_CLASSF_EIA_608) {
-                AV * av = newAV();
-                int idx;
-                for (idx = 0; (idx < 33) && (p_pi->type_id[idx] != 0); idx++) {
-                        av_push(av, newSViv(p_pi->type_id[idx]));
-                }
-                hv_store_rv(hv, type_id, (SV*)av);
-        }
-        if (p_pi->rating_auth != VBI_RATING_AUTH_NONE) {
-                hv_store_iv(hv, rating_auth, p_pi->rating_auth);
-                hv_store_iv(hv, rating_id, p_pi->rating_id);
-        }
-        if (p_pi->rating_auth == VBI_RATING_AUTH_TV_US) {
-                hv_store_iv(hv, rating_dlsv, p_pi->rating_dlsv);
-        }
-        if (p_pi->audio[0].mode != VBI_AUDIO_MODE_UNKNOWN) {
-                hv_store_iv(hv, mode_a, p_pi->audio[0].mode);
-                if (p_pi->audio[0].language != NULL) {
-                        hv_store_pv(hv, language_a, (char*)p_pi->audio[0].language);
-                }
-        }
-        if (p_pi->audio[1].mode != VBI_AUDIO_MODE_UNKNOWN) {
-                hv_store_iv(hv, mode_b, p_pi->audio[1].mode);
-                if (p_pi->audio[1].language != NULL) {
-                        hv_store_pv(hv, language_b, (char*)p_pi->audio[1].language);
-                }
-        }
-        if (p_pi->caption_services != -1) {
-                AV * av = newAV();
-                int idx;
-                hv_store_iv(hv, caption_services, p_pi->caption_services);
-                for (idx = 0; idx < 8; idx++) {
-                        av_push(av, newSVpv((char*)p_pi->caption_language[idx], 0));
-                }
-                hv_store_rv(hv, caption_language, (SV*)av);
-        }
-        if (p_pi->cgms_a != -1) {
-                hv_store_iv(hv, cgms_a, p_pi->cgms_a);
-        }
-        if (p_pi->aspect.first_line != -1) {
-                HV * hv = newHV();
-                zvbi_xs_aspect_ratio_to_hv(hv, &p_pi->aspect);
-                hv_store_rv(hv, aspect, (SV*)hv);
-        }
-        if (p_pi->description[0][0] != 0) {
-                AV * av = newAV();
-                int idx;
-                for (idx = 0; idx < 8; idx++) {
-                        av_push(av, newSVpv((char*)p_pi->description[idx], 0));
-                }
-                hv_store_rv(hv, description, (SV*)av);
-        }
-}
-#endif // 0
-
-PyObject *
-ZvbiServiceDec_Event2Dict( vbi_event * ev )
-{
-    PyObject * dict = PyDict_New();
-
-    if (dict != NULL) {
-        vbi_bool ok = TRUE;
-
-        if (ev->type == VBI_EVENT_TTX_PAGE) {
-            ok = (PyDict_SetItemString(dict, "pgno", PyLong_FromLong(ev->ev.ttx_page.pgno)) == 0) &&
-                 (PyDict_SetItemString(dict, "subno", PyLong_FromLong(ev->ev.ttx_page.subno)) == 0) &&
-                 (PyDict_SetItemString(dict, "pn_offset", PyLong_FromLong(ev->ev.ttx_page.pn_offset)) == 0) &&
-                 (PyDict_SetItemString(dict, "raw_header", PyBytes_FromStringAndSize((char*)ev->ev.ttx_page.raw_header, 40)) == 0) &&
-                 (PyDict_SetItemString(dict, "roll_header", PyLong_FromLong(ev->ev.ttx_page.roll_header)) == 0) &&
-                 (PyDict_SetItemString(dict, "header_update", PyLong_FromLong(ev->ev.ttx_page.header_update)) == 0) &&
-                 (PyDict_SetItemString(dict, "clock_update", PyLong_FromLong(ev->ev.ttx_page.clock_update)) == 0);
-        }
-        else if (ev->type == VBI_EVENT_CAPTION) {
-            ok = (PyDict_SetItemString(dict, "pgno", PyLong_FromLong(ev->ev.ttx_page.pgno)) == 0);
-        }
-        else if (   (ev->type == VBI_EVENT_NETWORK)
-                 || (ev->type == VBI_EVENT_NETWORK_ID) )
-        {
-            ok = (PyDict_SetItemString(dict, "nuid", PyLong_FromLong(ev->ev.network.nuid)) == 0) &&
-                 (PyDict_SetItemString(dict, "tape_delay", PyLong_FromLong(ev->ev.network.tape_delay)) == 0) &&
-                 (PyDict_SetItemString(dict, "cni_vps", PyLong_FromLong(ev->ev.network.cni_vps)) == 0) &&
-                 (PyDict_SetItemString(dict, "cni_8301", PyLong_FromLong(ev->ev.network.cni_8301)) == 0) &&
-                 (PyDict_SetItemString(dict, "cni_8302", PyLong_FromLong(ev->ev.network.cni_8302)) == 0) &&
-                 (PyDict_SetItemString(dict, "cycle", PyLong_FromLong(ev->ev.network.cycle)) == 0);
-
-            if (ok && (ev->ev.network.name[0] != 0)) {
-                PyObject * str = PyUnicode_DecodeLatin1((char*)ev->ev.network.name, strlen((char*)ev->ev.network.name), NULL);
-                if (str != NULL) {
-                    ok = (PyDict_SetItemString(dict, "name", str) == 0);
-                }
-            }
-            if (ok && (ev->ev.network.call[0] != 0)) {
-                PyObject * str = PyUnicode_DecodeLatin1((char*)ev->ev.network.call, strlen((char*)ev->ev.network.call), NULL);
-                if (str != NULL) {
-                    ok = (PyDict_SetItemString(dict, "call", str) == 0);
-                }
-            }
-        }
-        else if (ev->type == VBI_EVENT_TRIGGER) {
-            Py_DECREF(dict);  // FIXME
-            dict = zvbi_xs_page_link_to_hv(ev->ev.trigger);
-        }
-        else if (ev->type == VBI_EVENT_ASPECT) {
-            //TODO zvbi_xs_aspect_ratio_to_hv(hv, &ev->ev.aspect);
-        }
-        else if (ev->type == VBI_EVENT_PROG_INFO) {
-            //TODO zvbi_xs_prog_info_to_hv(hv, ev->ev.prog_info);
-        }
-
-        if (!ok) {
-            Py_DECREF(dict);
-            dict = NULL;
-        }
-    }
-    return dict;
-}
-
 /*
  * Invoke callback for an event generated by the VT decoder
  */
@@ -491,16 +332,17 @@ zvbi_xs_vt_event_handler( vbi_event * event, void * user_data )
     if ( (cb_idx < ZVBI_MAX_CB_COUNT) &&
          ((cb_obj = ZvbiCallbacks.event[cb_idx].p_cb) != NULL) )
     {
-        PyObject * dict = ZvbiServiceDec_Event2Dict(event);
-
-        // invoke the Python subroutine
-        if (ZvbiCallbacks.event[cb_idx].p_data != NULL) {
-            PyObject_CallFunction(cb_obj, "iOO", event->type, dict, ZvbiCallbacks.event[cb_idx].p_data);
+        PyObject * ev_obj = ZvbiEvent_ObjFromEvent(event);
+        if (ev_obj != NULL) {
+            // invoke the Python subroutine
+            if (ZvbiCallbacks.event[cb_idx].p_data != NULL) {
+                PyObject_CallFunction(cb_obj, "iOO", event->type, ev_obj, ZvbiCallbacks.event[cb_idx].p_data);
+            }
+            else {
+                PyObject_CallFunction(cb_obj, "iO", event->type, ev_obj);
+            }
+            Py_DECREF(ev_obj);
         }
-        else {
-            PyObject_CallFunction(cb_obj, "iO", event->type, dict);
-        }
-        Py_DECREF(dict);
 
         // clear exceptions as we cannot handle them here
         if (PyErr_Occurred() != NULL) {

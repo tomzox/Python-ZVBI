@@ -18,6 +18,7 @@
 #include <libzvbi.h>
 
 #include "zvbi_page.h"
+#include "zvbi_event_types.h"
 
 // ---------------------------------------------------------------------------
 //  Rendering
@@ -45,50 +46,6 @@ PyObject * ZvbiPageError;
 #endif
 
 // ---------------------------------------------------------------------------
-
-PyObject *
-zvbi_xs_page_link_to_hv( vbi_link * p_ld )
-{
-    PyObject * dict = PyDict_New();
-
-    if (dict != NULL) {
-        vbi_bool ok = FALSE;
-
-        if ((PyDict_SetItemString(dict, "type", PyLong_FromLong(p_ld->type)) == 0) &&
-            (PyDict_SetItemString(dict, "eacem", PyLong_FromLong(p_ld->eacem)) == 0) &&
-            (PyDict_SetItemString(dict, "nuid", PyLong_FromLong(p_ld->nuid)) == 0) &&
-            (PyDict_SetItemString(dict, "pgno", PyLong_FromLong(p_ld->pgno)) == 0) &&
-            (PyDict_SetItemString(dict, "subno", PyLong_FromLong(p_ld->subno)) == 0) &&
-            (PyDict_SetItemString(dict, "expires", PyLong_FromLong(p_ld->expires)) == 0) &&
-            (PyDict_SetItemString(dict, "itv_type", PyLong_FromLong(p_ld->itv_type)) == 0) &&
-            (PyDict_SetItemString(dict, "priority", PyLong_FromLong(p_ld->priority)) == 0) &&
-            (PyDict_SetItemString(dict, "autoload", PyLong_FromLong(p_ld->autoload)) == 0))
-        {
-            ok = TRUE;
-
-            if (ok && (p_ld->name[0] != 0)) {
-                PyObject * obj = PyUnicode_FromString((char*)p_ld->name);
-                if (obj)
-                    ok = (PyDict_SetItemString(dict, "name", obj) == 0);
-            }
-            if (ok && (p_ld->url[0] != 0)) {
-                PyObject * obj = PyUnicode_FromString((char*)p_ld->url);
-                if (obj)
-                    ok = (PyDict_SetItemString(dict, "url", obj) == 0);
-            }
-            if (ok && (p_ld->script[0] != 0)) {
-                PyObject * obj = PyUnicode_FromString((char*)p_ld->script);
-                if (obj)
-                    ok = (PyDict_SetItemString(dict, "script", obj) == 0);
-            }
-        }
-        if (!ok) {
-            Py_DECREF(dict);
-            dict = NULL;
-        }
-     }
-     return dict;
-}
 
 PyObject *
 zvbi_xs_convert_rgba_to_ppm( ZvbiPageObj * self, const vbi_rgba * p_img,
@@ -857,7 +814,7 @@ ZvbiPage_resolve_link(ZvbiPageObj *self, PyObject *args)
         vbi_link ld;
         memset(&ld, 0, sizeof(ld));
         vbi_resolve_link(self->page, column, row, &ld);
-        RETVAL = zvbi_xs_page_link_to_hv(&ld);
+        RETVAL = ZvbiEvent_ObjFromPageLink(&ld);
     }
     return RETVAL;
 }
@@ -869,7 +826,7 @@ ZvbiPage_resolve_home(ZvbiPageObj *self, PyObject *args)
     memset(&ld, 0, sizeof(ld));
     vbi_resolve_home(self->page, &ld);
 
-    PyObject * RETVAL = zvbi_xs_page_link_to_hv(&ld);
+    PyObject * RETVAL = ZvbiEvent_ObjFromPageLink(&ld);
     return RETVAL;
 }
 

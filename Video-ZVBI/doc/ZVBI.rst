@@ -1213,8 +1213,10 @@ Constructor Zvbi.ServiceDec()
 
 Creates and returns a new data service decoder instance. The constructor
 does not take any parameters. **However**: The type of data services to
-be decoded is determined by the type of installed callbacks. Hence you
-must install at least one callback after construction.
+be decoded is determined by the type of installed callbacks. Hence for
+the class to do any actual decoding, you must install at least one
+callback using `Zvbi.ServiceDec.event_handler_register()`_ after
+construction.
 
 Zvbi.ServiceDec.decode()
 ------------------------
@@ -1227,12 +1229,13 @@ This is the main service offered by the data service decoder: The method
 decodes sliced VBI data from a video frame, updates the decoder state and
 invokes callback functions for registered events. Note this function has
 to be called for each received frame, even if it did not contain any
-sliced data, because the decode otherwise assumes a frame was lost and
-may reset decoder state.
+sliced data, because the decoder otherwise assumes a frame was lost and
+may reset decoding state.
 
-Input parameter *sliced_buf* is an instance of *CaptureSlicedBuf* returned
-by the *Capture* class. The function always returns *None*. As a
-side-effect registered callbacks are invoked.
+Input parameter *sliced_buf* has to be an instance of class
+*CaptureSlicedBuf* returned by *read* and *pull* capture functions of
+`Zvbi.Capture`_ class. The function always returns *None*. As a
+side-effect, registered callbacks are invoked.
 
 Zvbi.ServiceDec.decode_bytes()
 ------------------------------
@@ -1242,14 +1245,15 @@ Zvbi.ServiceDec.decode_bytes()
   vt.decode_bytes(data, n_lines, timestamp)
 
 This method is an alternate interface to *decode()*, allowing to insert
-data from external sources, such as sliced data stored in a file.
-Thus the parameters as the attributes stored in *CaptureSlicedBuf*:
+data from external sources, such as sliced data stored in a file.  Thus
+the discrete method parameters replace attributes otherwise stored in
+*CaptureSlicedBuf*:
 
 :data:
     Is a bytes-like object containing concatenated sliced data lines. Each
     line is a binary packed format "=LL56c", containing the service ID
     `VBI_SLICED_*`, the number of the (analog) line from where the line
-    was captured, followed by 56 bytes of sliced data.
+    was captured, followed by 56 bytes slicer output data.
 
 :n_lines:
     Gives the number of valid lines in the sliced data buffer. The value
@@ -1257,13 +1261,14 @@ Thus the parameters as the attributes stored in *CaptureSlicedBuf*:
     records in the given data buffer)
 
 :timestamp:
-    specifies the capture instant of the input data in seconds
-    and fractions since 1970-01-01 00:00 in *float* format. The timestamps
+    This should be a copy of the *timestamp* value returned by the *read*
+    and *pull* capture functions of `Zvbi.Capture`_ class.  The timestamps
     are expected to advance by 1/30 to 1/25 seconds for each call to this
     function. Different steps will be interpreted as dropped frames, which
-    starts a re-synchronization cycle, eventually a channel switch may be assumed
-    which resets even more decoder state. So this function must be called even
-    if a frame did not contain any useful data (with parameter *n_lines* = 0)
+    starts a re-synchronization cycle, eventually a channel switch may be
+    assumed which resets even more decoder state. So this function must be
+    called even if a frame did not contain any useful data (i.e. with
+    parameter *n_lines* equal 0)
 
 Zvbi.ServiceDec.channel_switched()
 ----------------------------------
@@ -1343,7 +1348,7 @@ Zvbi.ServiceDec.set_contrast()
     vt.set_contrast(contrast)
 
 Change contrast of text pages, this affects the color palette of pages
-fetched with *.->fetch_vt_page()* and *.->fetch_cc_page()*.
+fetched with *vt.fetch_vt_page()* and *vt.fetch_cc_page()*.
 Parameter *contrast* is in range -128 to 127, where -128 is inverse,
 127 maximum. Contrast value 64 is default.
 
@@ -1440,9 +1445,9 @@ snapshot of the page as it should appear on screen at the present time.
 
 With `Zvbi.ServiceDec.event_handler_register()`_ you can request a
 `VBI_EVENT_CAPTION` event to be notified about pending changes (in case of
-"roll-up" mode that is with each new word received) and the
-vbi_page->dirty fields will mark the lines actually in need of updates, to
-speed up rendering.
+"roll-up" mode that is with each new word received) and the "dirty"
+attribute provided by `Zvbi.Page.get_page_dirty_range()`_ will mark the
+lines actually in need of updates, for speeding-up rendering.
 
 If the *reset* parameter is omitted or set to *True*, the page dirty flags
 in the cached paged are reset after fetching. Pass *False* only if you
@@ -1471,6 +1476,8 @@ As usual, parameter *subno* defaults to `VBI_ANY_SUBNO`, which means the
 newest sub-page of the given page is used.  The function raises exception
 *ServiceDecError* upon errors.
 
+.. _Zvbi.ServiceDec event handling:
+
 Event handling
 --------------
 
@@ -1487,48 +1494,49 @@ stopped while in the callback, the handlers should return as soon as
 possible.
 
 The handler function receives two parameters: First is the event type
-(i.e. one of the `VBI_EVENT_*` constants), second a dict
-describing the event.
-
-The following event types are defined:
+(i.e. one of the `VBI_EVENT_*` constants), second a named tuple
+describing the event. The type and contents of the second parameter
+depends on the event type. The following event types are defined:
 
 *VBI_EVENT_NONE*:
-    No event.
+    No event. Second callback parameter is *None*.
 
 *VBI_EVENT_CLOSE*:
     The vbi decoding context is about to be closed. This event is
     sent when the decoder object is destroyed and can be used to
-    clean up event handlers.
+    clean up event handlers. Second callback parameter is *None*.
 
 *VBI_EVENT_TTX_PAGE*:
-    The vbi decoder received and cached another Teletext page
-    designated by *ev->{pgno}* and *ev->{subno}*.
+    The vbi decoder received and cached another Teletext page. For this
+    type the second callback function parameter has type
+    *Zvbi.EventTtx* with the following elements:
 
-    *ev->{roll_header}* flags the page header as suitable for
-    rolling page numbers, e. g. excluding pages transmitted out
-    of order.
+    The received page is designated by *ev.pgno* and *ev.subno*.
 
-    The *ev->{header_update}* flag is set when the header,
-    excluding the page number and real time clock, changed since the
-    last `VBI_EVENT_TTX_PAGE`. Note this may happen at midnight when the
-    date string changes. The *ev->{clock_update}* flag is set when
-    the real time clock changed since the last `VBI_EVENT_TTX_PAGE`
-    (that is at most once per second). They are both set at the first
-    `VBI_EVENT_TTX_PAGE` sent and unset while the received header
-    or clock field is corrupted.
+    *ev.roll_header* flags the page header as suitable for rolling page
+    numbers, e. g. excluding pages transmitted out of order.  The
+    *ev.header_update* flag is set when the header, excluding the page
+    number and real time clock, changed since the last
+    `VBI_EVENT_TTX_PAGE` evemt. Note this may happen at midnight when the
+    date string changes. The *ev.clock_update* flag is set when the real
+    time clock changed since the last `VBI_EVENT_TTX_PAGE` (that is at
+    most once per second). They are both set at the first
+    `VBI_EVENT_TTX_PAGE` sent and unset while the received header or clock
+    field is corrupted.
 
     If any of the roll_header, header_update or clock_update flags
-    are set *ev->{raw_header}* is a pointer to the raw header data
-    (40 bytes), which remains valid until the event handler returns.
-    *ev->{pn_offset}* will be the offset (0 ... 37) of the three
-    digit page number in the raw or formatted header. Always call
-    *vt.fetch_vt_page()* for proper translation of national characters
-    and character attributes, the raw header is only provided here
-    as a means to quickly detect changes.
+    are set, *ev.raw_header* contains the raw header data (40 bytes).
+    *ev.pn_offset* will be the offset (0 ... 37) of the three-digit page
+    number in the raw or formatted header. Always call
+    *vt.fetch_vt_page()* for proper translation of national characters and
+    character attributes; the raw header is only provided here as a means
+    to quickly detect changes.
 
 *VBI_EVENT_CAPTION*:
     A Closed Caption page has changed and needs visual update.
-    The page or "CC channel" is designated by *ev->{pgno}*.
+    For this type the second callback function parameter has type
+    *Zvbi.EventCaption* with a single element *ev.pgno*, which
+    indicates the "CC channel" of the received page.
 
     When the client is monitoring this page, the expected action is
     to call *vt.fetch_cc_page()*. To speed up rendering, more detailed
@@ -1546,19 +1554,26 @@ The following event types are defined:
     in real life, feeding the decoder with artificial data can confuse
     the logic.)
 
-    The dict contains the following elements:
-    nuid,
-    name,
-    call,
-    tape_delay,
-    cni_vps,
-    cni_8301,
-    cni_8302,
-    cycle.
+    For this type the second callback function parameter has type
+    *Zvbi.EventNetwork* with the following elements:
 
-    Minimum time to identify network, when data service is transmitted:
-    VPS (DE/AT/CH only): 0.08 seconds; Teletext PDC or 8/30: 2 seconds;
-    XDS (US only): unknown, between 0.1x to 10x seconds.
+    0. *nuid*: Network identifier
+    1. *name*: Name of the network from XDS or from a table lookup of CNIs in Teletext packet 8/30 or VPS
+    2. *call*: Network call letters, from XDS (i.e. closed-caption, US only), else empty
+    3. *tape_delay*: Tape delay in minutes, from XDS; 0 outside of US
+    4. *cni_vps*: Network ID received from VPS, or zero if unknown
+    5. *cni_8301*: Network ID received from teletext packet 8/30/1, or zero if unknown
+    6. *cni_8302*: Network ID received from teletext packet 8/30/2, or zero if unknown
+
+    Minimum times for identifying a network, when data service is
+    transmitted: VPS (DE/AT/CH only): 0.08 seconds; Teletext PDC or 8/30:
+    2 seconds; XDS (US only): unknown, between 0.1x to 10x seconds.
+
+*VBI_EVENT_NETWORK_ID*:
+    Like *VBI_EVENT_NETWORK*, but this event will also be sent when the
+    decoder cannot determine a network name.  For this type the second
+    callback function parameter has type *Zvbi.EventNetwork* with same
+    contents as described above.
 
 *VBI_EVENT_TRIGGER*:
     Triggers are sent by broadcasters to start some action on the
@@ -1567,43 +1582,87 @@ The following event types are defined:
     related (or unrelated) URLs, short messages and Teletext
     page links.
 
-    This event is sent when a trigger has fired.
-    The hash parameter contains the following elements:
-    type,
-    eacem,
-    name,
-    url,
-    script,
-    nuid,
-    pgno,
-    subno,
-    expires,
-    itv_type,
-    priority,
-    autoload.
+    This event is sent when a trigger has fired. The second callback
+    function parameter is of type *Zvbi.PageLink* and has the following
+    elements:
+
+    0. *type*: Link type: One of VBI_LINK* constants
+    1. *eacem*: Link received via EACEM or ATVEF transport method
+    2. *name*: Some descriptive text or empty
+    3. *url*: URL
+    4. *script*: A piece of ECMA script (Javascript), this may be used on
+       WebTV or SuperTeletext pages to trigger some action. Usually empty.
+    5. *nuid*: Network ID for linking to pages on other channels
+    6. *pgno*: Teletext page number
+    7. *subno*: Teletext sub-page number
+    8. *expires*: The time in seconds and fractions since 1970-01-01 00:00
+       when the link should no longer be offered to the user, similar to a
+       HTTP cache expiration date
+    9. *itv_type*: One of VBI_WEBLINK_* constants; only applicable to ATVEF triggers; else UNKNOWN
+    10. *priority*: Trigger priority (0=EMERGENCY, should never be
+        blocked, 1..2=HIGH, 3..5=MEDIUM, 6..9=LOW) for ordering and filtering
+    11. *autoload*: Open the target without user confirmation
 
 *VBI_EVENT_ASPECT*:
-    The vbi decoder received new information (potentially from
-    PAL WSS, NTSC XDS or EIA-J CPR-1204) about the program
-    aspect ratio.
+    The vbi decoder received new information (potentially from PAL WSS,
+    NTSC XDS or EIA-J CPR-1204) about the program aspect ratio.
 
-    The hash parameter contains the following elements:
-    first_line,
-    last_line,
-    ratio,
-    film_mode,
-    open_subtitles.
+    The second callback function parameter is of type *Zvbi.AspectRatio*
+    and has the following elements:
+
+    0. *first_line*: Describe start of active video (inclusive), i.e.
+       without the black bars in letterbox mode
+    1. *last_line*: Describes enf of active video (inclusive)
+    2. *ratio*: The picture aspect ratio in anamorphic mode, 16/9 for
+       example. Normal or letterboxed video has aspect ratio 1/1
+    3. *film_mode*: TRUE when the source is known to be film transferred
+       to video, as opposed to interlaced video from a video camera.
+    4. *open_subtitles*: Describes how subtitles are inserted into the
+       picture: None, or overlay in picture, or in letterbox bars, or
+       unknown.
 
 *VBI_EVENT_PROG_INFO*:
     We have new information about the current or next program.
-    (Note this event is preliminary as info from Teletext is not implemented yet.)
 
-    The dict contains the program description including
-    many parameters. See libzvbi documentation for details.
+    The second callback function parameter is of type *Zvbi.ProgInfo*
+    and has the following elements:
 
-*VBI_EVENT_NETWORK_ID*:
-    Like `VBI_EVENT_NETWORK`, but this event will also be sent
-    when the decoder cannot determine a network name.
+    0. *current_or_next*: Indicates if entry refers to the current or next program
+    1. *start_month*: Month of the start date
+    2. *start_day*: Day-of-month of the start date
+    3. *start_hour*: Hour of the start time
+    4. *start_min*: Minute of the start time
+    5. *tape_delayed*: Indicates if a program is routinely tape delayed for
+       Western US time zones.
+    6. *length_hour*: Duration in hours
+    7. *length_min*: Duration remainder in minutes
+    8. *elapsed_hour*: Already elapsed duration
+    9. *elapsed_min*: Already elapsed duration
+    10. *elapsed_sec*: Already elapsed duration
+    11. *title*: Program title text (ASCII)
+    12. *type_classf*: Scheme used for program type classification:
+        One of the *VBI_PROG_CLASSF* constants. Use
+        `Zvbi.prog_type_string()`_ for obtaining a string from this
+        value and each of the following type identifiers.
+    13. *type_id_0*: Program type classifier #1 according to scheme
+    14. *type_id_1*: Program type classifier #2
+    15. *type_id_2*: Program type classifier #3
+    16. *type_id_3*: Program type classifier #4
+    17. *rating_auth*: Scheme used for rating: One of VBI_RATING_AUTH*
+        constants. Use `Zvbi.rating_string()`_ for obtaining a string from
+        this value and the following *rating_id*.
+    18. *rating_id*: Rating classification
+    19. *rating_dlsv*: Additional rating for scheme in case of
+        scheme *VBI_RATING_TV_US*
+    20. *audio_mode_a*: Audio mode: One of VBI_AUDIO_MODE* constants
+    21. *audio_language_a*: Audio language (audio channel A)
+    22. *audio_mode_b*: Audio mode (channel B)
+    23. *audio_language_b*: Audio language (audio channel B)
+    24. *caption_services*: Active caption pages: bits 0-7 correspond to caption pages 1-8
+    25. *caption_languages*: Tuple with caption language on all 8 CC pages
+    26. *aspect_ratio*: Aspect ratio description, an instance of class *Zvbi.AspectRatio*
+    27. *description*: Program content description text: Up to 8 lines
+        of ASCII text spearated by newline character.
 
 Zvbi.ServiceDec.event_handler_register()
 ----------------------------------------
@@ -1622,9 +1681,14 @@ The registered handler function with two or three parameters, depending
 on the presence of parameter *user_data*:
 
 1. Event type (i.e. one of the `VBI_EVENT_*` constants).
-2. Reference to a *dict* describing the event. Contents depend on the type
-   of event. See documentation of struct `vbi_event` in libzvbi for details.
-3. A copy of the *user_data* object specified during registration.
+2. A named tuple type describing the event. The class type depends on the
+   type of event indicated as first parameter.
+3. A copy of the *user_data* object specified during registration. The
+   parameter is omitted when no *user_data* was passed during
+   registration.
+
+See section `Zvbi.ServiceDec event handling`_ above for a detailed
+descripion of the callback parameters and information types.
 
 Apart of adding handlers, this function also enables and disables decoding
 of data services depending on the presence of at least one handler for the
@@ -1641,15 +1705,16 @@ Zvbi.ServiceDec.event_handler_unregister()
 
 ::
 
-    vt.event_handler_unregister(handler [, user_data])
+    vt.event_handler_unregister(function, [user_data])
 
-De-registers the event handler *handler* with parameter *user_data*,
-if such a handler was previously registered.
+De-registers the event handler *handler* with optional parameter
+*user_data*, if such a handler was previously registered with the same
+user data parameter.
 
-Apart of removing a handler this function also disables decoding
-of data services when no handler is registered to consume the
-respective data. Removing the last `VBI_EVENT_TTX_PAGE` handler for
-example disables Teletext decoding.
+Apart from removing a handler, this function also disables decoding of
+associated data services when no handler is registered to consume the
+respective data. For example, removing the last handler for event type
+`VBI_EVENT_TTX_PAGE` disables Teletext decoding.
 
 This function can be safely called at any time, even from inside of a
 handler removing itself or another handler, and regardless if the handler
@@ -2523,8 +2588,8 @@ discarded without further checks. Create a set by ORing
 *pts* contains the presentation time stamp which will be encoded
 into the PES packet. Bits 33 ... 63 are discarded.
 
-*raw* shall contain a raw VBI frame of (*sp->{count_a}*
-+ *sp->{count_b}*) lines times *sp->{bytes_per_line}*.
+*raw* shall contain a raw VBI frame of (*sp.count_a*
++ *sp.count_b*) lines times *sp.bytes_per_line*.
 The function encodes only those lines which have been selected by sliced
 lines in the *sliced* array with id `VBI_SLICED_VBI_625`
 The data field of these structures is ignored. When the sliced input
@@ -2597,8 +2662,8 @@ discarded without further checks. Create a set by ORing
 *pts* This Presentation Time Stamp will be encoded into the
 PES packet. Bits 33 ... 63 are discarded.
 
-*raw* shall contain a raw VBI frame of (*sp->{count_a}*
-+ *sp->{count_b}*) lines times *sp->{bytes_per_line}*.
+*raw* shall contain a raw VBI frame of (*sp.count_a*
++ *sp.count_b*) lines times *sp.bytes_per_line*.
 The function encodes only those lines which have been selected by sliced
 lines in the *sliced* array with id `VBI_SLICED_VBI_625`
 The data field of these structures is ignored. When the sliced input
@@ -3355,10 +3420,11 @@ Zvbi.rating_string()
     rating = Zvbi.rating_string(auth, id)
 
 Translate a program rating code given by *auth* and *id* into a
-Latin-1 string, native language.  Returns `undef` if this code is
-undefined. The input parameters will usually originate from
-*ev->{rating_auth}* and *ev->{rating_id}* in an event struct
-passed for a data service decoder event of type `VBI_EVENT_PROG_INFO`.
+string, native language.  Raises exception *Zvbi.Error* if this
+code is undefined. The input parameters will usually originate from
+elements *ev.rating_auth* and *ev.rating_id*, provided within an instance
+of type *Zvbi.ProgInfo* for an event of type `VBI_EVENT_PROG_INFO` raised
+by `Zvbi.ServiceDec event handling`_.
 
 Zvbi.prog_type_string()
 -----------------------
@@ -3367,11 +3433,13 @@ Zvbi.prog_type_string()
 
     prog_type = Zvbi.prog_type_string(classf, id)
 
-Translate a vbi_program_info program type code into a Latin-1 string,
-currently English only.  Returns `undef` if this code is undefined.
-The input parameters will usually originate from *ev->{type_classf}*
-and array members *ev->{type_id}* in an event struct
-passed for a data service decoder event of type `VBI_EVENT_PROG_INFO`.
+Translate a vbi_program_info program type code into string, currently
+English only. Raises exception *Zvbi.Error* if this code is undefined.
+
+The input parameters will usually originate from elements *ev.type_classf*
+and *ev.type_id_0* et.al., provided within an instance of type
+*Zvbi.ProgInfo* for an event of type `VBI_EVENT_PROG_INFO` raised by
+`Zvbi.ServiceDec event handling`_.
 
 Zvbi.iconv_caption()
 --------------------
@@ -3499,14 +3567,18 @@ functions. You can also use them as examples for your code:
     is started, and the content of matching pages is printed on the terminal.
 
 :browse-ttx.py:
-    The script captures from `/dev/vbi0` and displays teletext pages in
-    a small GUI using TkInter.
+    Example for the use of classes `Zvbi.Page`_ and `Zvbi.Export`_ for
+    rendering teletext pages. The script captures teletext from a given
+    device and renders selected teletext pages in a simple GUI using
+    TkInter.
 
 :osc.py:
     Example for the use of class `Zvbi.RawDec`_.
-    The script captures raw VBI data from a device and displays the data as
-    an animated gray-scale image. One selected line is plotted and the decoded
-    teletext or VPS Data of that line is shown.
+    The script continuously captures raw VBI data and displays the data as
+    an animated gray-scale image. Below this, the analog wave line of one
+    selected video line is plotted (i.e. essentially simulating an
+    oscilloscope). For the selected line, the resulting data from slicing
+    is also shown if decoding is successful.
     (This script is loosely based on `test/osc.c` in the libzvbi package.)
 
 :dvb-mux.py:

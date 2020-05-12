@@ -27,6 +27,7 @@
 #include "zvbi_export.h"
 #include "zvbi_search.h"
 #include "zvbi_callbacks.h"
+#include "zvbi_event_types.h"
 
 #include "zvbi_dvb_mux.h"
 #include "zvbi_dvb_demux.h"
@@ -457,6 +458,38 @@ Zvbi_encode_vps_cni(PyObject *self, PyObject *args)
 }
 
 static PyObject *
+Zvbi_rating_string(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    unsigned auth;
+    unsigned id;
+
+    if (PyArg_ParseTuple(args, "II", &auth, &id)) {
+        const char * p = vbi_rating_string(auth, id);
+        if (p != NULL) {
+            RETVAL = PyUnicode_DecodeLatin1(p, strlen(p), "ignore");
+        }
+    }
+    return RETVAL;
+}
+
+static PyObject *
+Zvbi_prog_type_string(PyObject *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    unsigned classf;
+    unsigned id;
+
+    if (PyArg_ParseTuple(args, "II", &classf, &id)) {
+        const char * p = vbi_prog_type_string(classf, id);
+        if (p != NULL) {
+            RETVAL = PyUnicode_DecodeLatin1(p, strlen(p), "ignore");
+        }
+    }
+    return RETVAL;
+}
+
+static PyObject *
 Zvbi_iconv_caption(PyObject *self, PyObject *args)
 {
     PyObject * RETVAL = NULL;
@@ -528,6 +561,8 @@ static PyMethodDef Zvbi_Methods[] =
     {"decode_vps_cni",    Zvbi_decode_vps_cni,    METH_VARARGS, NULL},
     {"encode_vps_cni",    Zvbi_encode_vps_cni,    METH_VARARGS, NULL},
 
+    {"rating_string",     Zvbi_rating_string,     METH_VARARGS, NULL},
+    {"prog_type_string",  Zvbi_prog_type_string,  METH_VARARGS, NULL},
     {"iconv_caption",     Zvbi_iconv_caption,     METH_VARARGS, NULL},
     {"caption_unicode",   Zvbi_caption_unicode,   METH_VARARGS, NULL},
 
@@ -568,6 +603,7 @@ PyInit_Zvbi(void)
         (PyInit_CaptureBuf(module, ZvbiError) < 0) ||
         (PyInit_ServiceDec(module, ZvbiError) < 0) ||
         (PyInit_Page(module, ZvbiError) < 0) ||
+        (PyInit_EventTypes(module, ZvbiError) < 0) ||
         (PyInit_Export(module, ZvbiError) < 0) ||
         (PyInit_Search(module, ZvbiError) < 0))
     {

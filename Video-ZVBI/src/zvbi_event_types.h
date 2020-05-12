@@ -11,14 +11,14 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-#if !defined (_PY_ZVBI_PAGE_H)
-#define _PY_ZVBI_PAGE_H
+#if !defined (_PY_ZVBI_EVENT_TYPES_H)
+#define _PY_ZVBI_EVENT_TYPES_H
 
-extern PyTypeObject ZvbiPageTypeDef;
+//extern PyTypeObject * ZvbiEvent_PageLinkType;
 
-PyObject * ZvbiPage_New(vbi_page * page, vbi_bool do_free_pg);
-vbi_page * ZvbiPage_GetPageBuf(PyObject * obj);
+PyObject * ZvbiEvent_ObjFromPageLink( vbi_link * p_ld );
+PyObject * ZvbiEvent_ObjFromEvent( vbi_event * ev );
 
-int PyInit_Page(PyObject * module, PyObject * error_base);
+int PyInit_EventTypes(PyObject * module, PyObject * error_base);
 
-#endif  /* _PY_ZVBI_PAGE_H */
+#endif  /* _PY_ZVBI_EVENT_TYPES_H */

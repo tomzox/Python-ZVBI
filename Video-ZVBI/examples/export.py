@@ -39,9 +39,9 @@ cr = '\r' if sys.stdout.isatty() else "\n"
 def ev_handler(pg_type, ev, user_data=None):
     global quit
 
-    print("%cPage %03x.%02x " % (cr, ev['pgno'], ev['subno'] & 0xFF), end='', file=sys.stderr)
+    print("%cPage %03x.%02x " % (cr, ev.pgno, ev.subno & 0xFF), end='', file=sys.stderr)
 
-    if not export_pgno == -1 and not ev['pgno'] == export_pgno:
+    if not export_pgno == -1 and not ev.pgno == export_pgno:
         return
 
     if sys.stderr.isatty():
@@ -50,11 +50,11 @@ def ev_handler(pg_type, ev, user_data=None):
 
     # Fetching & exporting here is a bad idea,
     # but this is only a test.
-    page = vtdec.fetch_vt_page(ev['pgno'], ev['subno'])
+    page = vtdec.fetch_vt_page(ev.pgno, ev.subno)
 
     try:
         if export_pgno == -1:
-            name = ("test-%03x-%02x.%s" % (ev['pgno'], ev['subno'], extension))
+            name = ("test-%03x-%02x.%s" % (ev.pgno, ev.subno, extension))
             ex.to_file(page, name)
         else:
             sys.stdout.flush()

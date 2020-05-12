@@ -46,10 +46,10 @@ redraw = False
 # updates the display if the scheduled page has been captured.
 #
 def pg_handler(pgtype, ev, user_data=None):
-    pg_lab.set("Page %03x.%02x " % (ev['pgno'], ev['subno'] & 0xFF))
+    pg_lab.set("Page %03x.%02x " % (ev.pgno, ev.subno & 0xFF))
 
     global redraw
-    if ev['pgno'] == pg_sched:
+    if ev.pgno == pg_sched:
         redraw = True
 
 #
@@ -87,8 +87,9 @@ def cap_init():
     if opt.v4l2:
         opt_buf_count = 5
         opt_services = Zvbi.VBI_SLICED_TELETEXT_B
+        opt_scanning = (525 if opt.ntsc else (625 if opt.pal else 0))
         opt_strict = 0
-        cap = Zvbi.Capture(opt.device, services=opt_services,
+        cap = Zvbi.Capture(opt.device, services=opt_services, scanning=opt_scanning,
                            buffers=opt_buf_count, strict=opt_strict, trace=opt.verbose)
     else:
         cap = Zvbi.Capture(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
@@ -222,9 +223,9 @@ def pg_link(x, y):
                 fh = tk.call("font", "metrics", font, "-linespace")
                 fw = font.measure("0")
 
-            h = pg.resolve_link(math.floor(x / fw + .5), math.floor(y / fh + .5))
-            if h['type'] == Zvbi.VBI_LINK_PAGE:
-                pg_sched = h['pgno']
+            link = pg.resolve_link(math.floor(x / fw + .5), math.floor(y / fh + .5))
+            if link.type == Zvbi.VBI_LINK_PAGE:
+                pg_sched = link.pgno
                 dec_entry.set("%03X" % pg_sched)
             redraw = True
         except (Zvbi.ServiceDecError, Zvbi.PageError):
@@ -325,12 +326,12 @@ def gui_init():
 
 def ParseCmdOptions():
     parser = argparse.ArgumentParser(description="Plotter of captured raw VBI data")
-    parser.add_argument("-d", "--device", type=str, default="/dev/dvb/adapter0/demux0")
-    parser.add_argument(      "--pid", type=int, default=104)
-    parser.add_argument(      "--v4l2", action='store_true', default=False)
-    parser.add_argument(      "--pal", action='store_true', default=False)
-    parser.add_argument(      "--ntsc", action='store_true', default=False)
-    parser.add_argument("-v", "--verbose", action='count', default=0)
+    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0")
+    parser.add_argument("--pid", type=int, default=104)
+    parser.add_argument("--v4l2", action='store_true', default=False)
+    parser.add_argument("--pal", action='store_true', default=False)
+    parser.add_argument("--ntsc", action='store_true', default=False)
+    parser.add_argument("--verbose", action='count', default=0)
     return parser.parse_args()
 
 def main_func():

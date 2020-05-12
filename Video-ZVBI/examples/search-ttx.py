@@ -31,7 +31,7 @@ last_subno = -1
 
 def pg_handler(pgtype, ev, user_data=None):
     print("%sPage %03x.%02x "
-            % (cr, ev['pgno'], ev['subno'] & 0xFF),
+            % (cr, ev.pgno, ev.subno & 0xFF),
           file=sys.stderr, end='')
 
 
@@ -113,5 +113,8 @@ def ParseCmdOptions():
     parser.add_argument("--verbose", "-v", action='store_true', default=False)
     return parser.parse_args()
 
-opt = ParseCmdOptions()
-main_func()
+try:
+    opt = ParseCmdOptions()
+    main_func()
+except KeyboardInterrupt:
+    print("")  # needed due to progress output without trailing NL

@@ -199,13 +199,13 @@ def clear():
 #  Callback invoked by the VBI decoder when a new CC line is available
 #
 def cc_handler(type, ev):
-    if (pgno.get() != -1) and (ev['pgno'] != pgno.get()):
+    if (pgno.get() != -1) and (ev.pgno != pgno.get()):
         return
 
     # Fetching & rendering in the handler
     # is a bad idea, but this is only a test
 
-    pg = vbi.fetch_cc_page(ev['pgno'])
+    pg = vbi.fetch_cc_page(ev.pgno)
 
     (rows, columns) = pg.get_page_size()
     (y0, y1, roll) = pg.get_page_dirty_range()

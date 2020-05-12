@@ -189,6 +189,7 @@ ZvbiCapture_read_raw(ZvbiCaptureObj *self, PyObject *args)
         tv.tv_usec = (timeout_ms % 1000) * 1000;
 
         int st = vbi_capture_read_raw(self->ctx, raw_buffer, &timestamp, &tv);
+        // FIXME code duplication across 6 read & pull variants
         if (st > 0) {
             RETVAL = PyStructSequence_New(ZvbiCapture_ResultType);
             if (RETVAL) {

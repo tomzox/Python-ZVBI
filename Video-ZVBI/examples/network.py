@@ -48,17 +48,17 @@ def ev_handler(ev_type, ev, user_data=None):
     else:
         raise Exception("Unexpected event type: " + str(ev_type))
 
-    if ev.get('name'):
+    if ev.name != "":
         # The network name is an ISO-8859-1 string (the API is quite old...) so
         # we convert it to locale encoding, nowadays usually UTF-8.
         # (Note this is done automatically within the Zvbi module)
-        network_name = ev['name']
+        network_name = ev.name
     else:
         network_name = "unknown"
 
     # ASCII.
-    if ev.get('call'):
-        call_sign = ev['call']
+    if ev.call != "":
+        call_sign = ev.call
     else:
         call_sign = "unknown"
 
@@ -67,14 +67,14 @@ def ev_handler(ev_type, ev, user_data=None):
            (event_name,
             network_name,
             call_sign,
-            ev['cni_vps'],
-            ev['cni_8301'],
-            ev['cni_8302']))
+            ev.cni_vps,
+            ev.cni_8301,
+            ev.cni_8302))
 
     global quit
-    if (((ev['cni_vps'] != 0) and opt.vps) or
-        ((ev['cni_8301'] != 0) and opt.p8301) or
-        ((ev['cni_8302'] != 0) and opt.p8302)):
+    if (((ev.cni_vps != 0) and opt.vps) or
+        ((ev.cni_8301 != 0) and opt.p8301) or
+        ((ev.cni_8302 != 0) and opt.p8302)):
         quit = True
 
 
@@ -128,12 +128,12 @@ def main_func():
 
 def ParseCmdOptions():
     parser = argparse.ArgumentParser(description='Capture and print network identification')
-    parser.add_argument("--vps", action='store_true', default=False)
-    parser.add_argument("--p8301", action='store_true', default=False)
-    parser.add_argument("--p8302", action='store_true', default=False)
     parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0")
     parser.add_argument("--pid", type=int, default=104)
     parser.add_argument("--v4l2", action='store_true', default=False)
+    parser.add_argument("--vps", action='store_true', default=False)
+    parser.add_argument("--p8301", action='store_true', default=False)
+    parser.add_argument("--p8302", action='store_true', default=False)
     parser.add_argument("--verbose", "-v", action='store_true', default=False)
     return parser.parse_args()
 

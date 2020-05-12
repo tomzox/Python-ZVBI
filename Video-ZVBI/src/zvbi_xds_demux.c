@@ -155,30 +155,4 @@ vbi_xds_demux_feed_frame(xd, sv_sliced, n_lines)
         OUTPUT:
         RETVAL
 
-// static methods
-
-void
-rating_string(auth, id)
-        int auth
-        int id
-        PREINIT:
-        const char * p = vbi_rating_string(auth, id);
-        PPCODE:
-        if (p != NULL) {
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal(newSVpv(p, strlen(p))));
-        }
-
-void
-prog_type_string(classf, id)
-        int classf
-        int id
-        PREINIT:
-        const char * p = vbi_prog_type_string(classf, id);
-        PPCODE:
-        if (p != NULL) {
-                EXTEND(sp, 1);
-                PUSHs (sv_2mortal(newSVpv(p, strlen(p))));
-        }
-
 #endif // 0
