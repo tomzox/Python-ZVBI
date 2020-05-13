@@ -88,6 +88,7 @@ def main_func():
 
     print("Press RETURN to stop capture and enter a search pattern", file=sys.stderr)
 
+    # TODO use separate thread for capturing (as example & to avoid blocking during search)
     while True:
         # check if STDIN is readable (i.e. RETURN key was pressed)
         ret, foo1, foo2 = select.select([sys.stdin], [], [], 0)

@@ -541,7 +541,7 @@ Zvbi.Capture.update_services()
 
 ::
 
-    services = cap.update_services(services, reset=False, commit=False, strict=0)
+    services = cap.update_services(services, reset=True, commit=True, strict=0)
 
 Not applicable to DVB:
 Adds and/or removes one or more services to an already initialized capture
@@ -561,14 +561,16 @@ requested (not including previously added services), 0 upon errors.
     constants describing the data services to be decoded.
 
 :reset:
-    When this optional parameter is set True, the method clears all
+    When this optional parameter is set *True*, the method clears all
     previous services before adding new ones (by invoking
-    `Zvbi.RawDec.reset()`_ at the appropriate time.)
+    `Zvbi.RawDec.reset()`_ at the appropriate time.) When *False*, new
+    services are in addition to previously configured services.
 
 :commit:
     When this optional parameter is set True, the method applies all
-    previously added services to the device; when doing subsequent calls
-    of this function, commit should be set only for the last call.
+    previously added services to the device. Set this to *False* when
+    doing multiple consecutive calls of this function; then commit should
+    be set only for the last call.
     Reading data cannot continue before changes were committed (because
     capturing has to be suspended to allow resizing the VBI image.)  Note
     this flag is ignored when using the VBI proxy.
@@ -962,10 +964,19 @@ synchronous:
 Class Zvbi.Proxy
 ================
 
-This class is used for receiving sliced or raw data from VBI proxy daemon.
+This class is used for receiving sliced or raw data from a VBI proxy daemon.
 Using the daemon instead of capturing directly from a VBI device allows
 multiple applications to capture concurrently, e.g. to decode multiple data
 services.
+
+Note the proxy is only useful if all VBI applications use it. For
+applications that do not support the proxy directly, there is a library
+that can overload calls to C library, so that access to the VBI device is
+redirected transparently through the daemon. Details are described in the
+manual *zvbi-chains(1)*. In principle it's as easy as as prepending
+`zvbi-chains -dev /dev/vbi0` to the application command line.
+
+See `examples/proxy-test.pl` for examples how to use these functions.
 
 Constructor Zvbi.Proxy
 ----------------------
@@ -1006,15 +1017,13 @@ Proxy.set_callback()
 
 ::
 
-    proxy.set_callback(callback, user_data=None)
+    proxy.set_callback(callback=None, user_data=None)
 
 Installs or removes a callback function for asynchronous messages (e.g.
-channel change notifications.)  The callback function is typically invoked
-while processing a read from the capture device.
-
-Input parameters are a callable object *callback* and an optional object
-*user_data* which is passed through to the callback function unchanged.
-Call without arguments to remove the callback again.
+channel change notifications.) Input parameters are a callable object
+*callback* and an optional object *user_data* which is passed through to
+the callback function unchanged.  Call without any arguments to remove the
+callback again.
 
 The callback function will receive the event mask (i.e. one of the
 constants `VBI_PROXY_EV_*` in the following list) and, if provided,
@@ -1044,8 +1053,26 @@ constants `VBI_PROXY_EV_*` in the following list) and, if provided,
 * *VBI_PROXY_EV_NONE*:
   No news.
 
+Since the proxy client has no "life" on it's own (i.e.  it's not using an
+internal thread or process) callbacks will only occur from inside other
+proxy client or capture function calls.  The client's capture device file
+descriptor will become readable when an asynchronous message has arrived
+from the daemon.  Typically the application then will call read to obtain
+sliced data and the callback will be invoked from inside the read
+function.  Usually in this case the read call will return zero, i.e.
+indicate an timeout since no actual sliced data has arrived.
+
+Note for channel requests the callback to grant channel control may be
+invoked before the request function returns.  Note you can call any
+interface function from inside the callback, including the destroy
+operator.
+
 Proxy.get_driver_api()
 ----------------------
+
+::
+
+    api = proxy.get_driver_api()
 
 This method can be used for querying which driver is behind the
 device which is currently opened by the VBI proxy daemon.
@@ -1062,12 +1089,13 @@ i.e. one of the symbols
 The function will fail if the client is currently not connected to
 the proxy daemon, i.e. VBI capture has to be started first.
 
-Proxy.channel_request
----------------------
+Proxy.channel_request()
+-----------------------
 
 ::
 
-    Proxy.channel_request(chn_prio [, profile])
+    Proxy.channel_request(chn_prio, request_chn=False, allow_suspend=FALSE,
+                          sub_prio=-1, min_duration=-1, exp_duration=-1)
 
 This method is used to request permission to switch channels or norm.
 Since the VBI device can be shared with other proxy clients, clients should
@@ -1090,10 +1118,41 @@ with higher priority.  If a callback has been registered, the respective
 function will be invoked when the token arrives; otherwise
 *proxy.has_channel_control()*> can be used to poll for it.
 
-To set the priority level to "background" only without requesting a channel,
-omit the *profile* parameter. Else, this parameter must be a
-dict with the following members: "sub_prio", "allow_suspend",
-"min_duration" and "exp_duration".
+Input parameters:
+
+:chn_prio:
+    This mandatory parameter sets the priority. The priority should always
+    be set if default *VBI_CHN_PRIO_INTERACTIVE* is not needed, to avoid
+    blocking other applications.
+
+:request_chn:
+    Set this parameter to *True* if your application needs to switch
+    channels.  Inversely, for only setting the *chn_prio* level to
+    *VBI_CHN_PRIO_BACKGROUND* without requesting a channel, set this
+    parameter to *False*.
+
+    **Note** the following parameters have no effect when this parameter
+    is set to *False*.  Inversely, when this parameter is set, the
+    following parameters are mandatory.
+
+:allow_suspend:
+    Set to FALSE if your capture client needs an atomic time slice (i.e.
+    would need to restart capturing from the beginning it it was
+    interrupted.)
+
+:sub_prio:
+    Sub-priority for channel scheduling at "background" priority. You can
+    use aribtrary values in the range 0 ... 256, but as this value is only
+    meaningful in relation to priorities used by other clients, you should
+    stick to the scale defined by VBI_CHN_SUBPRIO.
+
+:min_duration:
+    Minimum time slice your capture client requires. This value is used
+    when multiple clients have the same sub-priority to give all clients
+    channel control in a round-robin manner.
+
+:exp_duration:
+    Expected duration of use of that channel.
 
 Zvbi.Proxy.channel_notify()
 ---------------------------
@@ -1122,8 +1181,8 @@ Sends channel control request to proxy daemon. Parameter
   the channel and/or norm was changed.  Note this affects other
   clients' capturing too, so use with care.  Other clients will
   be informed about this change by a channel change indication.
-* *VBI_PROXY_CHN_NORM*:
 
+* *VBI_PROXY_CHN_NORM*:
   Indicate a norm change.  The new norm should be supplied in
   the scanning parameter in case the daemon is not able to
   determine it from the device directly.
@@ -1161,35 +1220,45 @@ The caller has to query the driver API via *proxy.get_driver_api()*>
 first and use the respective ioctl codes, same as if the device would
 be used directly.
 
-Parameters and results are equivalent to the called **ioctl** operation,
-i.e. *request* is an IO code and *arg* is a packed binary structure.
-After the call *arg* may be modified for operations which return data.
-You must make sure the result buffer is large enough for the returned data.
-Use Perl's *pack* to build the argument buffer. Example:
+Parameters and results are as documented for the **ioctl(2)** system
+interface (see the respective UNIX manual page for details). Therefore
+parameter *request* is the first parameter to *ioctl()* and the *arg*
+byte buffer contains the data structure that the second parameter to
+*ioctl* points to. Use *struct.pack* to build the argument buffer.
+Example: ::
 
-::
+    # get current config of the selected channel
+    vchan = struct.pack("=i32xiLhh", channel, 0, 0, 0, norm);
+    vchan_result = proxy.device_ioctl(VIDIOCGCHAN, vchan);
 
-  # get current config of the selected channel
-  vchan = struct.pack("ix32iLss", channel, 0, 0, 0, norm);
-  proxy.device_ioctl(VIDIOCGCHAN, vchan);
+After the call, the data passed in *arg* may be modified by *ioctl*
+operations which return data. Therefore the the proxy returns an updated
+copy of the input buffer, which is returned by the function in form of a
+bytes object.
 
-The result is 0 upon success, else and `!` set appropriately.  The function
-also will fail with error code `EBUSY` if the client doesn't have permission
-to control the channel.
+Upon failure of the I/O operation, the function raises exception *OSError*
+and includes the *errno* error code and string as usual. The same
+exception is also used for non-device related failures, as the proxy
+response currently does not allow distinguishing them. In particular error
+code *EBUSY* may indicate that the application is currently not allowed to
+control the device.
 
 Proxy.get_channel_desc()
 ------------------------
 
+::
+
+    scanning, granted = proxy.get_channel_desc()
+
 Retrieve info sent by the proxy daemon in a channel change indication.
-The function returns a list with two members: scanning value (625, 525 or 0)
-and a boolean indicator if the change request was granted.
+The function returns a tuple with two elements: scanning value (625
+indicating PAL, or 525 indicating NTSC, or 0 if unknown) and a boolean
+indicator if the change request was granted.
 
 Proxy.has_channel_control()
 ---------------------------
 
 Returns True if client is currently allowed to switch channels, else False.
-
-See **examples/proxy-test.pl** for examples how to use these functions.
 
 
 .. _Zvbi.ServiceDec:

@@ -55,6 +55,7 @@ ZvbiServiceDec_dealloc(ZvbiServiceDecObj *self)
     if (self->ctx) {
         vbi_decoder_delete(self->ctx);
     }
+    // FIXME unused - missing assignment upon registration?
     if (self->old_ev_cb) {
         Py_DECREF(self->old_ev_cb);
     }

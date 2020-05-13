@@ -473,28 +473,30 @@ ZvbiCapture_get_fd(ZvbiCaptureObj *self, PyObject *args)
 }
 
 static PyObject *
-ZvbiCapture_update_services(ZvbiCaptureObj *self, PyObject *args)
+ZvbiCapture_update_services(ZvbiCaptureObj *self, PyObject *args, PyObject *kwds)
 {
+    static char * kwlist[] = {"services", "reset", "commit", "strict", NULL};
     unsigned int services = 0;
-    int reset = FALSE;
-    int commit = FALSE;
+    int reset = TRUE;
+    int commit = TRUE;
     int strict = 0;
     char * errorstr = NULL;
-    PyObject * RETVAL;
+    PyObject * RETVAL = NULL;
 
-    if (!PyArg_ParseTuple(args, "I|$ppI", &services, &reset, &commit, &strict)) {
-        return NULL;
-    }
-    services = vbi_capture_update_services(self->ctx, reset, commit, services, strict, &errorstr);
-    if (services != 0) {
-        RETVAL = PyLong_FromLong(services);
-    }
-    else {
-        PyErr_SetString(ZvbiCaptureError, errorstr ? errorstr : "unknown error");
-        RETVAL = NULL;
-    }
-    if (errorstr != NULL) {
-        free(errorstr);
+    if (PyArg_ParseTupleAndKeywords(args, kwds, "I|$ppI", kwlist,
+                                          &services, &reset, &commit, &strict))
+    {
+        services = vbi_capture_update_services(self->ctx, reset, commit, services, strict, &errorstr);
+        if (services != 0) {
+            RETVAL = PyLong_FromLong(services);
+        }
+        else {
+            PyErr_SetString(ZvbiCaptureError, errorstr ? errorstr : "zero compatible services");
+            RETVAL = NULL;
+        }
+        if (errorstr != NULL) {
+            free(errorstr);
+        }
     }
     return RETVAL;
 }
@@ -537,7 +539,7 @@ static PyMethodDef ZvbiCapture_MethodsDef[] =
 
     {"parameters",      (PyCFunction) ZvbiCapture_parameters,      METH_NOARGS,  NULL },
     {"get_fd",          (PyCFunction) ZvbiCapture_get_fd,          METH_NOARGS,  NULL },
-    {"update_services", (PyCFunction) ZvbiCapture_update_services, METH_VARARGS, NULL },
+    {"update_services", (PyCFunction) ZvbiCapture_update_services, METH_VARARGS | METH_KEYWORDS, NULL },
     {"get_scanning",    (PyCFunction) ZvbiCapture_get_scanning,    METH_NOARGS,  NULL },
     {"flush",           (PyCFunction) ZvbiCapture_flush,           METH_NOARGS,  NULL },
     {"get_fd_flags",    (PyCFunction) ZvbiCapture_get_fd_flags,    METH_NOARGS,  NULL },
