@@ -39,14 +39,12 @@ import re
 import select
 import Zvbi
 
-# constants
-VIDIOCGCAP = 0x803C7601  # from linux/videodev.h
-VIDIOCGCHAN = 0xC0307602
-VIDIOCSCHAN = 0x40307603
-VIDIOCGFREQ = 0x8008760E
-VIDIOCSFREQ = 0x4008760F
-VIDIOCGTUNER = 0xC0407604
-VIDIOCSTUNER = 0x40407605
+# constants from linux/videodev2.h
+VIDIOC_ENUMINPUT = 0xC050561A
+VIDIOC_G_INPUT = 0x80045626
+VIDIOC_S_INPUT = 0xC0045627
+VIDIOC_G_FREQUENCY = 0xC02C5638
+VIDIOC_S_FREQUENCY = 0x402C5639
 
 all_services_625 =   ( Zvbi.VBI_SLICED_TELETEXT_B |
                        Zvbi.VBI_SLICED_VPS |
@@ -63,57 +61,57 @@ opt_scanning = 0
 opt_services = 0
 
 update_services = False
-proxy = None # for callback
+proxy = None # for use in callback
 
 # ---------------------------------------------------------------------------
-# Switch channel and frequency (Video 4 Linux #1 API)
+# Switch channel and frequency (Video 4 Linux #2 API)
 #
-def SwitchTvChannel(proxy, channel, freq):
+def SwitchTvChannel(proxy, input_idx, freq):
    result = True
 
-   if (channel != -1):
+   if (input_idx != -1):
       result = False
 
-      norm = 0
-      if (opt_scanning == 625):
-         norm = 0
-      elif (opt_scanning == 525):
-         norm = 1
-
-      vchan = struct.pack("i32xiLhh", channel, 0, 0, 0, norm)
-
-      # get current config of the selected chanel
+      # get current selected input
       try:
-         proxy.device_ioctl(VIDIOCGCHAN, vchan)
-         (vc_channel, vc_tuners, vc_flags, vc_type, vc_norm) = struct.unpack("i32xiLhh", vchan)
+         vinp = struct.pack("=i", 0)
+         vinp = proxy.device_ioctl(VIDIOC_G_INPUT, vinp)
+         prev_inp_idx = struct.unpack("=i", vinp)[0]
 
          # insert requested channel and norm into the struct
-         vchan = struct.pack("i32xiLhh", channel, vc_tuners, vc_flags, vc_type, norm)
+         vinp = struct.pack("=i", input_idx)
 
          # send channel change request
          try:
-            proxy.device_ioctl(VIDIOCSCHAN, vchan)
+            proxy.device_ioctl(VIDIOC_S_INPUT, vinp)
+            print("Successfully switched video input from %d to %d" % (prev_inp_idx, input_idx))
             result = True
-
          except OSError as e:
-            print("ioctl VIDIOCSCHAN:", e, file=sys.stderr)
+            print("ioctl VIDIOC_S_INPUT:", e, file=sys.stderr)
 
       except OSError as e:
-         print("ioctl VIDIOCGCHAN:", e, file=sys.stderr)
+         print("ioctl VIDIOC_G_INPUT:", e, file=sys.stderr)
 
    if (freq != -1):
       result = False
 
-      if ( (channel == -1) or ((vc_type & 1) and (vc_flags & 1)) ):
+      # query current tuner parameters (including frequency)
+      try:
+         vfreq = struct.pack("=LLL32x", 0, 0, 0)
+         vfreq = proxy.device_ioctl(VIDIOC_G_FREQUENCY, vfreq)
+         vtuner, vtype, prev_freq = struct.unpack("=LLL32x", vfreq)
+
          # send frequency change request
-         arg = struct.pack("L", freq)
          try:
-            proxy.device_ioctl(VIDIOCSFREQ, arg)
+            vfreq = struct.pack("=LLL32x", vtuner, vtype, freq)
+            proxy.device_ioctl(VIDIOC_S_FREQUENCY, vfreq)
+            print("Successfully switched frequency: from %d to %d (tuner:%d type:%d)"
+                    % (prev_freq, freq, vtuner, vtype), file=sys.stderr)
             result = True
          except OSError as e:
-            print("ioctl VIDIOCSFREQ:", e, file=sys.stderr)
-      else:
-         print("cannot tune frequency: channel channel has no tuner", file=sys.stderr)
+            print("ioctl VIDIOC_S_FREQUENCY(%d):" % freq, e, file=sys.stderr)
+      except OSError as e:
+         print("ioctl VIDIOC_G_FREQUENCY:", e, file=sys.stderr)
 
    return result
 
@@ -133,8 +131,8 @@ def ProxyEventCallback(ev_mask):
       elif (ev_mask & Zvbi.VBI_PROXY_EV_CHN_GRANTED):
          print("ProxyEventCallback: token granted", file=sys.stderr)
 
-         if ((opt.channel != -1) or (opt.freq != -1)):
-            if (SwitchTvChannel(proxy, opt.channel, opt.freq)):
+         if ((opt.vinput != -1) or (opt.freq != -1)):
+            if (SwitchTvChannel(proxy, opt.vinput, opt.freq)):
                flags = (Zvbi.VBI_PROXY_CHN_TOKEN |
                         Zvbi.VBI_PROXY_CHN_FLUSH)
             else:
@@ -152,10 +150,12 @@ def ProxyEventCallback(ev_mask):
 
       if (ev_mask & Zvbi.VBI_PROXY_EV_CHN_CHANGED):
          lfreq = 0
-         buf = struct.pack("L", lfreq)
+         # query frequency: tuner, type=V4L2_TUNER_ANALOG_TV, frequency
+         buf = struct.pack("=LLL32x", 0, 0, 0)
          try:
-            proxy.device_ioctl(VIDIOCGFREQ, buf)
-            lfreq = struct.unpack("L", buf)
+            buf = proxy.device_ioctl(VIDIOC_G_FREQUENCY, buf)
+            lfreq = struct.unpack("=LLL32x", buf)[2]
+            print("Proxy granted video freq: %d" % lfreq, file=sys.stderr)
          except OSError as e:
             print("ProxyEventCallback: VIDIOCGFREQ failed:", e, file=sys.stderr)
 
@@ -287,7 +287,7 @@ def ParseCmdOptions():
             "       -api <type>         : v4l API: proxy|v4l2|v4l\n"+
             "       -strict <level>     : service strictness level: 0..2\n"+
             "       -norm PAL|NTSC      : specify video norm as PAL or NTSC\n"+
-            "       -channel <index>    : switch video input channel\n"+
+            "       -vinput <index>     : switch video input source\n"+
             "       -freq <kHz * 16>    : switch TV tuner frequency\n"+
             "       -chnprio <1..3>     : channel switch priority\n"+
             "       -subprio <0..4>     : background scheduling priority\n"+
@@ -301,7 +301,7 @@ def ParseCmdOptions():
    parser.add_argument("--api", type=str, default="proxy", help="v4l API: proxy|v4l2|v4l")
    parser.add_argument("--strict", type=int, default=0, help="service strictness level: 0..2")
    parser.add_argument("--norm", type=str, default="", help="specify video norm as PAL or NTSC")
-   parser.add_argument("--channel", type=int, default=-1, help="switch video input channel")
+   parser.add_argument("--vinput", type=int, default=-1, help="switch video input source")
    parser.add_argument("--freq", type=int, default=-1, help="switch TV tuner frequency (unit: kHz*16)")
    parser.add_argument("--chnprio", type=int, default=Zvbi.VBI_CHN_PRIO_INTERACTIVE, help="channel switch priority 1..3")
    parser.add_argument("--subprio", type=int, default=0, help="background scheduling priority 0..4")
@@ -384,17 +384,17 @@ def main():
       last_line_count = -1
 
       # switch to the requested channel
-      if ( (opt.channel != -1) or (opt.freq != -1) or
+      if ( (opt.vinput != -1) or (opt.freq != -1) or
            (opt.chnprio != Zvbi.VBI_CHN_PRIO_INTERACTIVE) ):
 
          proxy.channel_request(opt.chnprio,
-                               request_chn   = (opt.channel != -1) or (opt.freq != -1),
+                               request_chn   = (opt.vinput != -1) or (opt.freq != -1),
                                sub_prio      = opt.subprio,
                                exp_duration  = 0,
                                min_duration  = 10)
 
          if (opt.chnprio != Zvbi.VBI_CHN_PRIO_BACKGROUND):
-            SwitchTvChannel(proxy, opt.channel, opt.freq)
+            SwitchTvChannel(proxy, opt.vinput, opt.freq)
 
       # initialize services for raw capture
       if ((opt_services & (Zvbi.VBI_SLICED_VBI_625 | Zvbi.VBI_SLICED_VBI_525)) != 0):
@@ -449,7 +449,7 @@ def main():
                         PrintVpsData(data)
 
                      elif (slc_id & Zvbi.VBI_SLICED_WSS_625):
-                        (w0, w1, w2) = struct.unpack("ccc", data)
+                        (w0, w1, w2) = struct.unpack("=ccc", data)
                         print("WSS 0x%02X%02X%02X" % (w0, w1, w2))
 
                      elif (slc_id & (Zvbi.VBI_SLICED_CAPTION_625 | Zvbi.VBI_SLICED_CAPTION_525)):
@@ -484,7 +484,7 @@ def main():
                         PrintVpsData(data)
 
                      elif (slc_id & Zvbi.VBI_SLICED_WSS_625):
-                        (w0, w1, w2) = struct.unpack("ccc", data)
+                        (w0, w1, w2) = struct.unpack("=ccc", data)
                         print("WSS 0x%02X%02X%02X" % (w0, w1, w2))
 
                      elif (slc_id & (Zvbi.VBI_SLICED_CAPTION_625 | Zvbi.VBI_SLICED_CAPTION_525)):
