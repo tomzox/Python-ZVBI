@@ -99,8 +99,8 @@ def main_func():
             search(vtdec)
 
         try:
-            cap_data = cap.pull_sliced(10)
-            vtdec.decode(cap_data.sliced_buffer)
+            sliced_buf = cap.pull_sliced(10)
+            vtdec.decode(sliced_buf)
         except Zvbi.CaptureError as e:
             if "timeout" not in str(e):
                 print("Capture error: %s" % e)

@@ -33,13 +33,6 @@ typedef struct {
     unsigned services;
 } ZvbiCaptureObj;
 
-#if defined (NAMED_TUPLE_GC_BUG)
-static PyTypeObject ZvbiCapture_ResultTypeBuf;
-static PyTypeObject * const ZvbiCapture_ResultType = &ZvbiCapture_ResultTypeBuf;
-#else
-static PyTypeObject * ZvbiCapture_ResultType = NULL;
-#endif
-
 PyObject * ZvbiCaptureError;
 
 // ---------------------------------------------------------------------------
@@ -180,8 +173,7 @@ ZvbiCapture_read_raw(ZvbiCaptureObj *self, PyObject *args)
     vbi_raw_decoder * p_par = vbi_capture_parameters(self->ctx);
     if (p_par != NULL) {
 	size_t size_raw = (p_par->count[0] + p_par->count[1]) * p_par->bytes_per_line;
-        PyObject * raw_obj = PyBytes_FromStringAndSize(NULL, size_raw);
-        void * raw_buffer = PyBytes_AS_STRING(raw_obj);
+        void * raw_buffer = PyMem_Malloc(size_raw);
 
         double timestamp = 0;
         struct timeval tv;
@@ -189,16 +181,8 @@ ZvbiCapture_read_raw(ZvbiCaptureObj *self, PyObject *args)
         tv.tv_usec = (timeout_ms % 1000) * 1000;
 
         int st = vbi_capture_read_raw(self->ctx, raw_buffer, &timestamp, &tv);
-        // FIXME code duplication across 6 read & pull variants
         if (st > 0) {
-            RETVAL = PyStructSequence_New(ZvbiCapture_ResultType);
-            if (RETVAL) {
-                PyStructSequence_SetItem(RETVAL, 0, PyFloat_FromDouble(timestamp));
-                PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(0));
-                PyStructSequence_SetItem(RETVAL, 2, raw_obj);
-                PyStructSequence_SetItem(RETVAL, 3, Py_None);
-                Py_INCREF(Py_None);
-            }
+            RETVAL = ZvbiCaptureRawBuf_FromData(raw_buffer, size_raw, timestamp);
         }
         else {
             if (st < 0) {
@@ -208,6 +192,7 @@ ZvbiCapture_read_raw(ZvbiCaptureObj *self, PyObject *args)
                 // FIXME use different exception
                 PyErr_SetString(ZvbiCaptureError, "timeout");
             }
+            PyMem_Free(raw_buffer);
         }
     }
     else {
@@ -238,17 +223,7 @@ ZvbiCapture_read_sliced(ZvbiCaptureObj *self, PyObject *args)
 
         int st = vbi_capture_read_sliced(self->ctx, p_sliced, &n_lines, &timestamp, &tv);
         if (st > 0) {
-            RETVAL = PyStructSequence_New(ZvbiCapture_ResultType);
-            if (RETVAL) {
-                PyStructSequence_SetItem(RETVAL, 0, PyFloat_FromDouble(timestamp));
-                PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(n_lines));
-                PyStructSequence_SetItem(RETVAL, 2, Py_None);
-                PyStructSequence_SetItem(RETVAL, 3, ZvbiCaptureSlicedBuf_FromData(p_sliced, n_lines, timestamp));
-                Py_INCREF(Py_None);
-            }
-            else {
-                PyMem_Free(p_sliced);
-            }
+            RETVAL = ZvbiCaptureSlicedBuf_FromData(p_sliced, n_lines, timestamp);
         }
         else {
             if (st < 0) {
@@ -280,10 +255,7 @@ ZvbiCapture_read(ZvbiCaptureObj *self, PyObject *args)
     if (p_par != NULL) {
 	size_t size_sliced = (p_par->count[0] + p_par->count[1]) * sizeof(vbi_sliced);
 	size_t size_raw = (p_par->count[0] + p_par->count[1]) * p_par->bytes_per_line;
-
-        PyObject * raw_obj = PyBytes_FromStringAndSize(NULL, size_raw);
-        void * raw_buffer = PyBytes_AS_STRING(raw_obj);
-
+        void * raw_buffer = PyMem_Malloc(size_raw);
         vbi_sliced * p_sliced = (vbi_sliced*) PyMem_Malloc(size_sliced);
 
         int n_lines = 0;
@@ -294,14 +266,13 @@ ZvbiCapture_read(ZvbiCaptureObj *self, PyObject *args)
 
         int st = vbi_capture_read(self->ctx, raw_buffer, p_sliced, &n_lines, &timestamp, &tv);
         if (st > 0) {
-            RETVAL = PyStructSequence_New(ZvbiCapture_ResultType);
+            RETVAL = PyTuple_New(2);
             if (RETVAL) {
-                PyStructSequence_SetItem(RETVAL, 0, PyFloat_FromDouble(timestamp));
-                PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(n_lines));
-                PyStructSequence_SetItem(RETVAL, 2, raw_obj);
-                PyStructSequence_SetItem(RETVAL, 3, ZvbiCaptureSlicedBuf_FromData(p_sliced, n_lines, timestamp));
+                PyTuple_SetItem(RETVAL, 0, ZvbiCaptureRawBuf_FromData(raw_buffer, size_raw, timestamp));
+                PyTuple_SetItem(RETVAL, 1, ZvbiCaptureSlicedBuf_FromData(p_sliced, n_lines, timestamp));
             }
             else {
+                PyMem_Free(raw_buffer);
                 PyMem_Free(p_sliced);
             }
         }
@@ -313,6 +284,7 @@ ZvbiCapture_read(ZvbiCaptureObj *self, PyObject *args)
                 // FIXME use different exception
                 PyErr_SetString(ZvbiCaptureError, "timeout");
             }
+            PyMem_Free(raw_buffer);
             PyMem_Free(p_sliced);
         }
     }
@@ -339,16 +311,7 @@ ZvbiCapture_pull_raw(ZvbiCaptureObj *self, PyObject *args)
 
     int st = vbi_capture_pull_raw(self->ctx, &raw_buffer, &tv);
     if (st > 0) {
-        double timestamp = raw_buffer->timestamp;
-
-        RETVAL = PyStructSequence_New(ZvbiCapture_ResultType);
-        if (RETVAL) {
-            PyStructSequence_SetItem(RETVAL, 0, PyFloat_FromDouble(timestamp));
-            PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(0));
-            PyStructSequence_SetItem(RETVAL, 2, ZvbiCaptureRawBuf_FromPtr(raw_buffer));
-            PyStructSequence_SetItem(RETVAL, 3, Py_None);
-            Py_INCREF(Py_None);
-        }
+        RETVAL = ZvbiCaptureRawBuf_FromPtr(raw_buffer);
     }
     else {
         if (st < 0) {
@@ -379,17 +342,7 @@ ZvbiCapture_pull_sliced(ZvbiCaptureObj *self, PyObject *args)
 
     int st = vbi_capture_pull_sliced(self->ctx, &sliced_buffer, &tv);
     if (st > 0) {
-        double timestamp = sliced_buffer->timestamp;
-        int sliced_lines = sliced_buffer->size / sizeof(vbi_sliced);
-
-        RETVAL = PyStructSequence_New(ZvbiCapture_ResultType);
-        if (RETVAL) {
-            PyStructSequence_SetItem(RETVAL, 0, PyFloat_FromDouble(timestamp));
-            PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(sliced_lines));
-            PyStructSequence_SetItem(RETVAL, 2, Py_None);
-            PyStructSequence_SetItem(RETVAL, 3, ZvbiCaptureSlicedBuf_FromPtr(sliced_buffer));
-            Py_INCREF(Py_None);
-        }
+        RETVAL = ZvbiCaptureSlicedBuf_FromPtr(sliced_buffer);
     }
     else {
         if (st < 0) {
@@ -421,21 +374,16 @@ ZvbiCapture_pull(ZvbiCaptureObj *self, PyObject *args)
 
     int st = vbi_capture_pull(self->ctx, &raw_buffer, &sliced_buffer, &tv);
     if (st > 0) {
-        double timestamp = sliced_buffer->timestamp;
-        int sliced_lines = sliced_buffer->size / sizeof(vbi_sliced);
-
-        RETVAL = PyStructSequence_New(ZvbiCapture_ResultType);
+        RETVAL = PyTuple_New(2);
         if (RETVAL) {
-            PyStructSequence_SetItem(RETVAL, 0, PyFloat_FromDouble(timestamp));
-            PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(sliced_lines));
             if (raw_buffer != NULL) {  // DVB devices may not return raw data
-                PyStructSequence_SetItem(RETVAL, 2, ZvbiCaptureRawBuf_FromPtr(raw_buffer));
+                PyTuple_SetItem(RETVAL, 0, ZvbiCaptureRawBuf_FromPtr(raw_buffer));
             }
             else {
-                PyStructSequence_SetItem(RETVAL, 2, Py_None);
+                PyTuple_SetItem(RETVAL, 0, Py_None);
                 Py_INCREF(Py_None);
             }
-            PyStructSequence_SetItem(RETVAL, 3, ZvbiCaptureSlicedBuf_FromPtr(sliced_buffer));
+            PyTuple_SetItem(RETVAL, 1, ZvbiCaptureSlicedBuf_FromPtr(sliced_buffer));
         }
     }
     else {
@@ -563,23 +511,6 @@ PyTypeObject ZvbiCaptureTypeDef =
     //.tp_members = ZvbiCapture_Members,
 };
 
-static PyStructSequence_Field ZvbiCapture_ResultDefMembers[] =
-{
-    { "timestamp", PyDoc_STR("Timestamp indicating when the data was captured") },
-    { "sliced_lines", PyDoc_STR("Number of valid lines in the sliced buffer") },
-    { "raw_buffer", PyDoc_STR("Container for captured raw data, or None if not requested") },
-    { "sliced_buffer", PyDoc_STR("Container for data of sliced lines, or None if not requested") },
-    { NULL, NULL }
-};
-
-static PyStructSequence_Desc ZvbiCapture_ResultDef =
-{
-    "ZvbiCapture.Result",
-    PyDoc_STR("Named tuple type returned by capturing, containing raw and sliced data"),
-    ZvbiCapture_ResultDefMembers,
-    4
-};
-
 vbi_capture *
 ZvbiCapture_GetCtx(PyObject * self)
 {
@@ -608,20 +539,6 @@ int PyInit_Capture(PyObject * module, PyObject * error_base)
         Py_DECREF(&ZvbiCaptureTypeDef);
         Py_XDECREF(ZvbiCaptureError);
         Py_CLEAR(ZvbiCaptureError);
-        return -1;
-    }
-
-    // create result container class type object
-#if defined (NAMED_TUPLE_GC_BUG)
-    if (PyStructSequence_InitType2(&ZvbiCapture_ResultTypeBuf, &ZvbiCapture_ResultDef) != 0)
-#else
-    ZvbiCapture_ResultType = PyStructSequence_NewType(&ZvbiCapture_ResultDef);
-    if (ZvbiCapture_ResultType == NULL)
-#endif
-    {
-        Py_DECREF(&ZvbiCapture_ResultType);
-        Py_DECREF(&ZvbiCaptureTypeDef);
-        Py_DECREF(ZvbiCaptureError);
         return -1;
     }
 

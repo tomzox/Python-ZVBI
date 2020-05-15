@@ -49,17 +49,21 @@ zvbi_xs_search_progress( vbi_page * p_pg, unsigned cb_idx )
          ((cb_obj = ZvbiCallbacks.search[cb_idx].p_cb) != NULL) )
     {
         PyObject * pg_obj = ZvbiPage_New(p_pg, FALSE);
-        PyObject * user_data = ZvbiCallbacks.search[cb_idx].p_data;
+        if (pg_obj != NULL) {
+            PyObject * user_data = ZvbiCallbacks.search[cb_idx].p_data;
 
-        // invoke the Python subroutine
-        PyObject * cb_rslt = PyObject_CallFunctionObjArgs(cb_obj, pg_obj, user_data, NULL);
+            // invoke the Python subroutine
+            PyObject * cb_rslt = PyObject_CallFunctionObjArgs(cb_obj, pg_obj, user_data, NULL);
 
-        // evaluate the result returned by the function
-        if (cb_rslt) {
-            result = (PyObject_IsTrue(cb_rslt) == 1);
+            // evaluate the result returned by the function
+            if (cb_rslt != NULL) {
+                result = (PyObject_IsTrue(cb_rslt) == 1);
+                Py_DECREF(cb_rslt);
+            }
+            Py_DECREF(pg_obj);
+
+            // TODO: page becomes invalid here; protect from access e.g. by setting pg_obj->page := NULL
         }
-        Py_DECREF(pg_obj);
-        // TODO: page becomes invalid here; protect from access e.g. by setting pg_obj->page := NULL
 
         // clear exceptions as we cannot handle them here
         if (PyErr_Occurred() != NULL) {

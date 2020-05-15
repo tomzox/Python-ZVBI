@@ -218,20 +218,15 @@ ZvbiRawDec_decode(ZvbiRawDecObj *self, PyObject *args)
     if (p_raw != NULL) {
         size_t raw_size = (self->rd.count[0] + self->rd.count[1]) * self->rd.bytes_per_line;
         if (raw_buf_size >= raw_size) {
-            RETVAL = PyTuple_New(2);
-            if (RETVAL != NULL) {
-                size_t size_sliced = (self->rd.count[0] + self->rd.count[1]) * sizeof(vbi_sliced);
-                vbi_sliced * p_sliced = (vbi_sliced*) PyMem_Malloc(size_sliced);
-                if (p_sliced != NULL) {
-                    int nof_lines = vbi_raw_decode(&self->rd, p_raw, p_sliced);
+            size_t size_sliced = (self->rd.count[0] + self->rd.count[1]) * sizeof(vbi_sliced);
+            vbi_sliced * p_sliced = (vbi_sliced*) PyMem_Malloc(size_sliced);
+            if (p_sliced != NULL) {
+                int nof_lines = vbi_raw_decode(&self->rd, p_raw, p_sliced);
 
-                    PyTuple_SetItem(RETVAL, 0, PyLong_FromLong(nof_lines));
-                    PyTuple_SetItem(RETVAL, 1, ZvbiCaptureSlicedBuf_FromData(p_sliced, nof_lines, timestamp));
-                }
-                else {
-                    PyErr_SetString(ZvbiRawDecError, "Failed to allocate memory for sliced buffer");
-                    Py_DECREF(RETVAL);
-                }
+                RETVAL = ZvbiCaptureSlicedBuf_FromData(p_sliced, nof_lines, timestamp);
+            }
+            else {
+                PyErr_SetString(ZvbiRawDecError, "Failed to allocate memory for sliced buffer");
             }
         }
         else {

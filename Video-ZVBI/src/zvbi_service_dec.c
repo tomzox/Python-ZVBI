@@ -28,8 +28,6 @@
 typedef struct {
     PyObject_HEAD
     vbi_decoder * ctx;
-    PyObject * old_ev_cb;
-    PyObject * old_ev_user_data;
 } ZvbiServiceDecObj;
 
 PyObject * ZvbiServiceDecError;
@@ -54,13 +52,6 @@ ZvbiServiceDec_dealloc(ZvbiServiceDecObj *self)
 {
     if (self->ctx) {
         vbi_decoder_delete(self->ctx);
-    }
-    // FIXME unused - missing assignment upon registration?
-    if (self->old_ev_cb) {
-        Py_DECREF(self->old_ev_cb);
-    }
-    if (self->old_ev_user_data) {
-        Py_DECREF(self->old_ev_user_data);
     }
     Py_TYPE(self)->tp_free((PyObject *) self);
 }
@@ -334,13 +325,19 @@ zvbi_xs_vt_event_handler( vbi_event * event, void * user_data )
          ((cb_obj = ZvbiCallbacks.event[cb_idx].p_cb) != NULL) )
     {
         PyObject * ev_obj = ZvbiEvent_ObjFromEvent(event);
+        PyObject * cb_rslt;
+
         if (ev_obj != NULL) {
             // invoke the Python subroutine
             if (ZvbiCallbacks.event[cb_idx].p_data != NULL) {
-                PyObject_CallFunction(cb_obj, "iOO", event->type, ev_obj, ZvbiCallbacks.event[cb_idx].p_data);
+                cb_rslt = PyObject_CallFunction(cb_obj, "iOO", event->type, ev_obj, ZvbiCallbacks.event[cb_idx].p_data);
             }
             else {
-                PyObject_CallFunction(cb_obj, "iO", event->type, ev_obj);
+                cb_rslt = PyObject_CallFunction(cb_obj, "iO", event->type, ev_obj);
+            }
+
+            if (cb_rslt != NULL) {
+                Py_DECREF(cb_rslt);
             }
             Py_DECREF(ev_obj);
         }

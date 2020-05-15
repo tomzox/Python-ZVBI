@@ -176,10 +176,10 @@ def draw(v=None):
             phys_line = draw_row.get() - par.count_a + par.start_b
             nchars = ("Row %d Line %d - " % (draw_row.get(), phys_line))
 
-        slines, sliced_data = rawdec.decode(raw1)
+        sliced_buf = rawdec.decode(raw1)
 
         # search the selected physical line in the slicer output
-        for sld, slid, slin in sliced_data:
+        for sld, slid, slin in sliced_buf:
             if slin == phys_line:
                 # display decoder output
                 draw_dec(nchars, sld, slid, slin)
@@ -233,11 +233,10 @@ def draw_plot():
 
     Poly = []
     r = src_h + 0 + dst_h
-    i = 0
-    for y in raw1[start : start + src_w]:
+    for i in range(0, src_w):
+        y = raw1[start + i]
         Poly.append(i)
-        Poly.append(r - y *dst_h//256)
-        i += 1
+        Poly.append(r - y * dst_h//256)
 
     canvas.coords(canvas_lid, Poly)
 
@@ -342,14 +341,13 @@ def init_window():
 def cap_frame():
     # note: must use "read" and not "pull" since a copy of the data is kept in "raw1"
     try:
-        cap_data = cap.read_raw(10)
-        draw(cap_data.raw_buffer)
+        raw_buf = cap.read_raw(10)
+        draw(raw_buf)
 
     except Zvbi.CaptureError as e:
         if ("timeout" not in str(e)) and opt.ignore_error:
             print("Capture error: %s" % e)
 
-    #print("raw: %f; sliced: %d" % (cap_data.timestamp, cap_data.sliced_lines))
     tk.after(10, cap_frame)
 
 

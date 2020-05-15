@@ -437,10 +437,10 @@ def main():
          if vbi_fd in ret:
             if ((opt_services & (Zvbi.VBI_SLICED_VBI_625 | Zvbi.VBI_SLICED_VBI_525)) == 0):
                try:
-                  cap_data = cap.pull_sliced(1000)
+                  sliced_buf = cap.pull_sliced(1000)
 
                   ttx_lines = 0
-                  for (data, slc_id, line) in cap_data.sliced_buffer:
+                  for (data, slc_id, line) in sliced_buf:
                      if (slc_id & Zvbi.VBI_SLICED_TELETEXT_B):
                         PrintTeletextData(data, line, slc_id)
                         ttx_lines += 1
@@ -455,8 +455,8 @@ def main():
                      elif (slc_id & (Zvbi.VBI_SLICED_CAPTION_625 | Zvbi.VBI_SLICED_CAPTION_525)):
                         print("CC data 0x%02X,%02X" % (Zvbi.unpar8(data[0]), Zvbi.unpar8(data[1])))
 
-                  if (last_line_count != cap_data.sliced_lines):
-                     last_line_count = cap_data.sliced_lines
+                  if (last_line_count != len(sliced_buf)):
+                     last_line_count = len(sliced_buf)
                      print("Receiving frames with %d sliced lines" % last_line_count, file=sys.stderr)
 
                except Zvbi.CaptureError as e:
@@ -469,8 +469,8 @@ def main():
             else:
                #res = cap.pull_raw(raw_buf, timestamp, 1000)
                try:
-                  cap_data = cap.read_raw(1000)
-                  line_count, sliced = raw.decode(cap.data.raw_buffer)
+                  raw_buf = cap.read_raw(1000)
+                  line_count, sliced = raw.decode(raw_buf)
 
                   if (last_line_count != line_count):
                      print("Receiving frames with %d slicable lines" % line_count, file=sys.stderr)

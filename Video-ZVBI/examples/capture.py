@@ -167,11 +167,11 @@ def decode_wss_cpr1204(buf):
         print("WSS CPR >> g=%08x crc=%08x" % (g, crc), file=sys.stderr)
 
 
-def decode_sliced(cap_data):
+def decode_sliced(sliced_buf):
     if opt.dump_sliced:
-        print("Sliced time: %f" % cap_data.timestamp)
+        print("Sliced time: %f" % sliced_buf.timestamp)
 
-        for data, slc_id, line in cap_data.sliced_buffer:
+        for data, slc_id, line in sliced_buf:
             print("%04x %3d > " % (slc_id, line), end='')
 
             for d in data:
@@ -183,7 +183,7 @@ def decode_sliced(cap_data):
             astr = re.sub(r'[\x00-\x1F\x7F]', '.', astr.decode('ISO-8859-1'))
             print(astr)
 
-    for data, slc_id, line in cap_data.sliced_buffer:
+    for data, slc_id, line in sliced_buf:
         if slc_id == 0:
             pass # nop
         elif not (slc_id & Zvbi.VBI_SLICED_VPS) == 0:
@@ -217,22 +217,22 @@ ServiceWidth = {
 
 last = 0.0
 
-def binary_sliced(cap_data):
+def binary_sliced(sliced_buf):
     global last
 
-    ts = cap_data.timestamp if (last > 0.0) else 0.04
-    outfile.write(bytes("%f\n" % cap_data.timestamp, 'ascii'))
+    ts = sliced_buf.timestamp if (last > 0.0) else 0.04
+    outfile.write(bytes("%f\n" % sliced_buf.timestamp, 'ascii'))
 
-    outfile.write(bytes([cap_data.sliced_lines]))
+    outfile.write(bytes([len(sliced_buf)]))
 
-    for data, slc_id, line in cap_data.sliced_buffer:
+    for data, slc_id, line in sliced_buf:
         if ServiceWidth.get(slc_id) and (ServiceWidth.get(slc_id)[0] > 0):
             outfile.write(bytes([ServiceWidth.get(slc_id)[1],
                                  line & 0xFF,
                                  line >> 8]))
             data_len = ServiceWidth.get(slc_id)[0]
             outfile.write(data[0 : data_len])
-            last = cap_data.timestamp
+            last = sliced_buf.timestamp
 
     outfile.flush()
 
@@ -248,24 +248,24 @@ def mainloop(cap):
 
     while True:
         if not opt.pull:
-            cap_data = cap.read(4000)
+            raw_buf, sliced_buf = cap.read(4000)
         else:
-            cap_data = cap.pull(4000)
+            raw_buf, sliced_buf = cap.pull(4000)
 
         if False:
             print(".", file=outfile)
             outfile.flush()
 
         if dump:
-            decode_sliced(cap_data)
+            decode_sliced(sliced_buf)
 
         if opt.sliced:
-            binary_sliced(cap_data)
+            binary_sliced(sliced_buf)
 
 #X#        if opt.pes or opt.ts:
 #X#            # XXX shouldn't use system time
 #X#            pts = timestamp * 90000.0
-#X#            _vbi_dvb_mux_feed (mx, pts, cap_data.sliced_buffer, cap_data.sliced_lines, -1); # service_set: all
+#X#            _vbi_dvb_mux_feed (mx, pts, sliced_buf, len(sliced_buf), -1); # service_set: all
 
 
 #static const char short_options[] = "123cd:elnpr:stvPT"

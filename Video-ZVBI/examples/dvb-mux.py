@@ -29,8 +29,8 @@ import argparse
 import re
 import Zvbi
 
-# callback function invoked by Video::ZVBI::dvb_mux::feed()
-def feed_cb(pkg, user_data=None):
+# callback function invoked by Zvbi.DvbMux.feed()
+def feed_cb(pkg):
     sys.stdout.write(pkg)
     print("wrote %d" % len(pkg))
     # return True, else multiplexing is aborted
@@ -52,14 +52,14 @@ def main_func():
 
     # create DVB multiplexer
     if opt.use_feed:
-        mux = Zvbi.DvbMux(pes=True, calback=feed_cb)
+        mux = Zvbi.DvbMux(pes=True, callback=feed_cb)
     else:
         mux = Zvbi.DvbMux(pes=True)
 
     while True:
         # read a sliced VBI frame
         try:
-            cap_data = cap.pull_sliced(1000)
+            sliced_buf = cap.pull_sliced(1000)
         except Zvbi.CaptureError as e:
             if "timeout" not in str(e):
                 print("Capture error: %s" % e, file=sys.stderr)
@@ -75,13 +75,13 @@ def main_func():
                 print("timestamp %f <- %d+%f" % (buf_left, n_lines, sliced_left), file=sys.stderr)
                 try:
                     # TODO: API
-                    mux.cor(buf, buf_left, cap_data.sliced, sliced_left, opt_services, cap_data.timestamp*90000.0)
+                    mux.cor(buf, buf_left, sliced_buf, sliced_left, opt_services, sliced_buf.timestamp*90000.0)
 
                 except Zvbi.DvbMuxError:
                     # encoding error: dump the offending line
                     print("ERROR in line %d" % (n_lines-sliced_left), file=sys.stderr)
 
-                    sset = cap_data.sliced_buffer[n_lines - sliced_left]
+                    sset = sliced_buf[n_lines - sliced_left]
                     data = Zvbi.unpar_str(sset[0])
                     data = re.sub(r'[\x00-\x1F\x7F]', '.', data.decode('ISO-8859-1'))
 
@@ -103,7 +103,7 @@ def main_func():
         else:
             try:
                 # TODO: API
-                mux.feed(sliced_data, opt_services, cap_data.timestamp*90000.0)
+                mux.feed(sliced_data, opt_services, sliced_buf.timestamp*90000.0)
             except Zvbi.DvbMuxError:
                 print("ERROR in feed", file=sys.stderr)
 

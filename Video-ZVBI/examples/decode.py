@@ -819,10 +819,10 @@ def main_func():
         opt.decode_8301 = True
         opt.decode_8302 = True
         opt.decode_caption = True
-        opt.decode_idl = True
         opt.decode_vps = True
         opt.decode_wss = True
-        opt.decode_xds = True
+        #TODO opt.decode_idl = True  # unsupported
+        #TODO opt.decode_xds = True  # unsupported
         opt.pfc_pgno = 0x1DF
 
     if sys.stdin.isatty():
@@ -864,5 +864,8 @@ def main_func():
 #   print("LOG ", level,context,message,user_data)
 #Zvbi.set_log_fn(Zvbi.VBI_LOG_DEBUG, vlog, "\n")
 
-opt = ParseCmdOptions()
-main_func()
+try:
+    opt = ParseCmdOptions()
+    main_func()
+except KeyboardInterrupt:
+    pass
