@@ -116,8 +116,24 @@ process the data within your application directly. After that it depends
 on your application which interfaces/classes you want to use for further
 processing decoded data.
 
-Classes with interfaces supported in libzvbi, but not yet implemented
-in the Python module:
+Special-purpose classes for DVB:
+
+`Zvbi.DvbDemux`_
+    Class performing de-multiplexing of a transport stream received from a
+    DVB driver, i.e. separating "VBI" data from a DVB PES stream (EN 301
+    472, EN 301 775). Note this class is used internally by the
+    *Zvbi.Capture* class for de-multiplexing. You should only use this
+    class directly when the data does not originate from a local device.
+`Zvbi.DvbMux`_
+    This class converts sliced and optionally raw VBI data to a DVB
+    Packetized Elementary Stream or Transport Stream as defined in EN 300
+    472 "Digital Video Broadcasting (DVB); Specification for conveying
+    ITU-R System B Teletext in DVB bit-streams" and EN 301 775 "Digital
+    Video Broadcasting (DVB); Specification for the carriage of Vertical
+    Blanking Information (VBI) data in DVB bit-streams".
+
+Classes with interfaces supported in libzvbi, but not implemented in the
+Python module as the respective data services are obsolete:
 
 `Zvbi.IdlDemux`_
     This class allows decoding data transmissions within a Teletext
@@ -128,21 +144,12 @@ in the Python module:
     Class for separating data transmitted in **Page Function Clear** teletext
     packets (ETS 300 708 section 4), i.e. using regular packets on a dedicated
     teletext page. Historically this protocol was used for **Nextview EPG**,
-    an EPG for analog television. This service is most likely obsolete today.
+    (i.e. an Electronic Programming Guide for analog television). This
+    service is most likely obsolete today.
 `Zvbi.XdsDemux`_
     Class for separating "Extended Data Service" from a Closed Caption stream
-    (EIA 608).
-`Zvbi.DvbDemux`_
-    Used internally by the Capture class for de-multiplexing
-    transport streams received from a DVB driver, i.e. separating "VBI" data
-    from a DVB PES stream (EN 301 472, EN 301 775).
-`Zvbi.DvbMux`_
-    This class converts raw and/or sliced VBI data to a DVB Packetized
-    Elementary Stream or Transport Stream as defined in EN 300 472 "Digital
-    Video Broadcasting (DVB); Specification for conveying ITU-R System B
-    Teletext in DVB bit-streams" and EN 301 775 "Digital Video Broadcasting
-    (DVB); Specification for the carriage of Vertical Blanking Information
-    (VBI) data in DVB bit-streams".
+    (EIA 608). This service allowed to transmit "now & next" EPG data in
+    addition to sub-titles. This service is most likely obsolete today.
 
 .. _Zvbi.Capture:
 
@@ -1141,7 +1148,7 @@ The token may be granted right away or at a later time, e.g. when it has
 to be reclaimed from another client first, or if there are other clients
 with higher priority.  If a callback has been registered, the respective
 function will be invoked when the token arrives; otherwise
-*proxy.has_channel_control()*> can be used to poll for it.
+*proxy.has_channel_control()* can be used to poll for it.
 
 Input parameters:
 
@@ -1241,7 +1248,7 @@ This method allows manipulating parameters of the underlying
 VBI device.  Not all ioctls are allowed here.  It's mainly intended
 to be used for channel enumeration and channel/norm changes.
 The request codes and parameters are the same as for the actual device.
-The caller has to query the driver API via *proxy.get_driver_api()*>
+The caller has to query the driver API via *proxy.get_driver_api()*
 first and use the respective ioctl codes, same as if the device would
 be used directly.
 
@@ -2600,40 +2607,68 @@ is available to convert a VPS PIL to a PDC descriptor (since version 0.3.0)
 Constructor Zvbi.DvbMux()
 -------------------------
 
+::
+
+    mx = Zvbi.DvbMux( {pes=True | ts_pid=pid}
+                      [,callback [,user_data]]
+                      [,raw_par] )
+
 There are two separate semantics:
 
-::
+* When option *pes* is present and *True*, a DVB VBI multiplexer instance is
+  created for converting raw and/or sliced VBI data to MPEG-2 Packetized
+  Elementary Stream (PES) packets as defined in the standards EN 300 472 and
+  EN 301 775.
 
-    mx = Zvbi.DvbMux(pes=1 [callback, user_data] )
+* When option *ts_pid* is present and non-zero, a DVB VBI multiplexer
+  instance is created for converting raw and/or sliced VBI data to MPEG-2
+  Transport Stream (TS) packets as defined in the standards EN 300 472 and
+  EN 301 775.
 
-Creates a new DVB VBI multiplexer converting raw and/or sliced VBI data
-to MPEG-2 Packetized Elementary Stream (PES) packets as defined in the
-standards EN 300 472 and EN 301 775.  Returns `undef` upon error.
+The following keyword-only parameters are available:
+
+:pes:
+    When this option is set, a PES stream will be encoded.
+    This option must not be combined with option *ts_pid*.
+
+:ts_pid:
+    When this option is present and non-zero, a TS stream will be encoded.
+    The PID value is a program identifier that will be stored in the
+    header of generated TS packets. The value must be in range 0x0010 to
+    0x1FFE inclusive. This option must not be combined with option *pes*.
 
 :callback:
-    Specifies a handler which is called by *mx.feed()* when a new packet is
-    available. Must be omitted if *mx.cor()* is used.  For further callback
-    parameters see the description of the *feed* function.
+    Specifies a handler function which is called by method *feed()* when a
+    new TS or PES packet is available. When the callback parameter is
+    omitted, packets have to be extracted via iteration. See method
+    *feed()* for additional details.
 
 :user_data:
-    Passed through to the *callback*.
+    The given object is passed through transparently as extra parameter to
+    the specified *callback* when invoked from within the *feed()* method.
 
-::
+:raw_par:
+    This optional parameter of type `Zvbi.RawParams`_ describes attributes
+    of raw data optionally provided to method `Zvbi.DvbMux.feed()`_. The
+    parameters have to match the capture source (i.e. usually one would
+    obtain them via `Zvbi.Capture.parameters()`_ called on your capture
+    instance). The parameter need not be specified when no raw data is to
+    be encoded.
 
-    mx = Zvbi.DvbMux(pes=0, pid=pid [callback, user_data] )
+Wen raw decoder parameters are provided, they have to meet the following
+constraints:
 
-Allocates a new DVB VBI multiplexer converting raw and/or sliced VBI data
-to MPEG-2 Transport Stream (TS) packets as defined in the standards
-EN 300 472 and EN 301 775. Returns `undef` upon error.
+* videostd_set must contain one or more bits from the
+  `VBI_VIDEOSTD_SET_625_50`.
+* scanning must be 625 (libzvbi 0.2.x only)
+* sampling_format must be `VBI_PIXFMT_Y8` or `VBI_PIXFMT_YUV420`.
+  Chrominance samples are ignored.
+* sampling_rate must be 13500000.
+* offset must be >= 132.
+* bytes_per_line must be >= 1.
+* offset + bytes_per_line must be <= 132 + 720.
+* synchronous must be *True*.
 
-Parameter *pid* is a program ID that will be stored in the header of the
-generated TS packets. The value must be in range 0x0010 to 0x1FFE inclusive.
-
-Parameter *callback* specifies a handler which is called by
-*mx.feed()* when a new packet is available. Must be omitted if
-*mx.cor()* is used.  The *user_data* is passed through to
-the handler.  For further callback parameters see the description
-of the *feed* function.
 
 Zvbi.DvbMux.mux_reset()
 -----------------------
@@ -2644,152 +2679,96 @@ Zvbi.DvbMux.mux_reset()
 
 This function clears the internal buffers of the DVB VBI multiplexer.
 
-After a reset call the *mx.cor()* function will encode a new
-PES packet, discarding any data of the previous packet which has not
-been consumed by the application.
-
-Zvbi.DvbMux.cor()
------------------
-
-::
-
-    mx.cor(buf, buffer_left, sliced, sliced_left, service_mask, pts [, raw, sp])
-
-This function converts raw and/or sliced VBI data to one DVB VBI PES
-packet or one or more TS packets as defined in EN 300 472 and
-EN 301 775, and stores them in the output buffer.
-
-If the returned *buffer_left* value is zero and the returned
-*sliced_left* value is greater than zero another call will be
-necessary to convert the remaining data.
-
-After a *reset()* call the *cor()* function will encode a new
-PES packet, discarding any data of the previous packet which has
-not been consumed by the application.
-
-Parameters:
-*buffer* will be used as output buffer for converted data. This scalar
-may be undefined; else it should have the length given in *buffer_left*.
-*buffer_left* the number of bytes available in *buffer*,
-and will be decremented by number of bytes stored there.
-*sliced* contains the sliced VBI data to be converted. All data
-must belong to the same video frame.  *sliced* is either a blessed
-reference to a sliced buffer, or a scalar with a byte string consisting
-of sliced data (i.e. the same formats are accepted as by *vt.decode()*.
-*sliced_left* must contain the number of sliced VBI lines in the
-input buffer *sliced*. It will be decremented by the number of
-successfully converted structures.  On failure it will point at
-the offending line index (relative to the end of the sliced array.)
-*service_mask* Only data services in this set will be
-encoded. Other data services in the sliced input buffer will be
-discarded without further checks. Create a set by ORing
-`VBI_SLICED_*` constants.
-*pts* contains the presentation time stamp which will be encoded
-into the PES packet. Bits 33 ... 63 are discarded.
-
-*raw* shall contain a raw VBI frame of (*sp.count_a*
-+ *sp.count_b*) lines times *sp.bytes_per_line*.
-The function encodes only those lines which have been selected by sliced
-lines in the *sliced* array with id `VBI_SLICED_VBI_625`
-The data field of these structures is ignored. When the sliced input
-buffer does not contain such structures *raw* can be omitted.
-*sp* Describes the data in the raw buffer unless raw is omitted.
-Else it must be valid, with the constraints described for *feed()*
-below.
-
-The function returns 0 on failures, which may occur under the
-following circumstances:
-
-* The maximum PES packet size, or the value selected with
-  *mx.set_pes_packet_size()*, is too small to contain all
-  the sliced and raw VBI data.
-
-* The sliced array is not sorted by ascending line number,
-  except for elements with line number 0 (undefined).
-
-* Only the following data services can be encoded:
-  (1) `VBI_SLICED_TELETEXT_B` on lines 7 to 22 and 320 to 335
-  inclusive, or with line number 0 (undefined). All Teletext
-  lines will be encoded with data_unit_id 0x02 ("EBU Teletext
-  non-subtitle data").
-  (2) `VBI_SLICED_VPS` on line 16.
-  (3) `VBI_SLICED_CAPTION_625` on line 22.
-  (4) `VBI_SLICED_WSS_625` on line 23.
-  (5) Raw VBI data with id `VBI_SLICED_VBI_625` can be encoded
-  on lines 7 to 23 and 320 to 336 inclusive. Note for compliance
-  with the Teletext buffer model defined in EN 300 472,
-  EN 301 775 recommends to encode at most one raw and one
-  sliced, or two raw VBI lines per frame.
-
-* A vbi_sliced structure contains a line number outside the
-  valid range specified above.
-
-* parameter *raw* is undefined although the sliced array contains
-  a structure with id `VBI_SLICED_VBI_625`.
-
-* One or more members of the *sp* structure are invalid.
-
-* A vbi_sliced structure with id `VBI_SLICED_VBI_625`
-  contains a line number outside the ranges defined by *sp*.
-
-On all errors *sliced_left* will refer to the offending sliced
-line in the index buffer (i.e. relative to the end of the buffer)
-and the output buffer remains unchanged.
+After a reset call the *feed()* function will encode a new PES packet,
+discarding any data of the previous packet which has not been consumed by
+the application.
 
 Zvbi.DvbMux.feed()
 ------------------
 
-::
+This method provides the main service of class *Zvbi.DvbMux*: ::
 
-    mx.feed(sliced, sliced_lines, service_mask, pts [, raw, sp])
+    mx.feed(service_mask, sliced_buf, raw_buf=None, pts=0)
 
 This function converts raw and/or sliced VBI data to one DVB VBI PES
-packet or one or more TS packets as defined in EN 300 472 and
-EN 301 775. To deliver output, the callback function passed to
-*pes_new()* or *ts_new()* is called once for each PES or TS packet.
+packet or one or more TS packets as defined in EN 300 472 and EN 301 775.
 
-Parameters:
-*sliced* contains the sliced VBI data to be converted. All data
-must belong to the same video frame.  *sliced* is either a blessed
-reference to a sliced buffer, or a scalar with a byte string consisting
-of sliced data (i.e. the same formats are accepted as by *vt.decode()*.
-*sliced_lines* number of valid lines in the *sliced* input buffer.
-*service_mask* Only data services in this set will be
-encoded. Other data services in the sliced buffer will be
-discarded without further checks. Create a set by ORing
-`VBI_SLICED_*` constants.
-*pts* This Presentation Time Stamp will be encoded into the
-PES packet. Bits 33 ... 63 are discarded.
+When a callback was configured during instantiation, it is invoked once
+for each generated PES or TS packet. Else generated packets have to be
+retrieved using iteration on the object. Example for the latter: ::
 
-*raw* shall contain a raw VBI frame of (*sp.count_a*
-+ *sp.count_b*) lines times *sp.bytes_per_line*.
-The function encodes only those lines which have been selected by sliced
-lines in the *sliced* array with id `VBI_SLICED_VBI_625`
-The data field of these structures is ignored. When the sliced input
-buffer does not contain such structures *raw* can be omitted.
+    sliced_buf = cap.pull_sliced(1000)
+    mx.feed(service_mask, sliced_buf)
+    for pes_or_ts_packet in mx:
+        # ... process pes_or_ts_packet
 
-*sp* describes the data in the raw buffer unless raw is omitted.
-Else it must be valid, with the following additional constraints:
-* videostd_set must contain one or more bits from the
-`VBI_VIDEOSTD_SET_625_50`.
-* scanning must be 625 (libzvbi 0.2.x only)
-* sampling_format must be `VBI_PIXFMT_Y8` or
-`VBI_PIXFMT_YUV420`. Chrominance samples are ignored.
-* sampling_rate must be 13500000.
-* offset must be >= 132.
-* samples_per_line (in libzvbi 0.2.x bytes_per_line) must be >= 1.
-* offset + samples_per_line must be <= 132 + 720.
-* synchronous must be set.
+Input parameters:
 
-The function returns 0 on failures. For a description of failure
-conditions see *cor()* above.
+:service_mask:
+    Only data services in this set will be encoded. Other data services in
+    the sliced buffer will be discarded without further checks. Create a
+    set by ORing `VBI_SLICED_*` constants. Only the following data
+    services can be encoded:
+
+    1. `VBI_SLICED_TELETEXT_B` on lines 7 to 22 and 320 to 335
+       inclusive, or with line number 0 (undefined). All Teletext
+       lines will be encoded with data_unit_id 0x02 ("EBU Teletext
+       non-subtitle data").
+    2. `VBI_SLICED_VPS` on line 16.
+    3. `VBI_SLICED_CAPTION_625` on line 22.
+    4. `VBI_SLICED_WSS_625` on line 23.
+
+:sliced_buf:
+    This mandatory parameter of type `Zvbi.CaptureSlicedBuf`_ contains the
+    sliced VBI data to be converted. All data must belong to the same
+    video frame.
+
+:raw_buf:
+    This optional parameter may pass an object of type
+    `Zvbi.CaptureRawBuf`_ that contains raw VBI data to be converted.  The
+    object shall contain sample data of size (*rdp.count_a* +
+    *rdp.count_b*) lines times *rdp.bytes_per_line* (where *rdp* is the
+    raw decoder parameter set passed during instantiation).  The function
+    encodes only those lines which have been selected by sliced lines in
+    the *sliced_buf* object with id `VBI_SLICED_VBI_625` The data field of
+    these structures is ignored. When the sliced input buffer does not
+    contain such structures, *raw_buf* can be omitted.
+
+    Raw VBI data with id `VBI_SLICED_VBI_625` can be encoded on lines 7 to
+    23 and 320 to 336 inclusive. Note for compliance with the Teletext
+    buffer model defined in EN 300 472, EN 301 775 recommends to encode at
+    most one raw and one sliced, or two raw VBI lines per frame.
+
+:pts:
+    This Presentation Time Stamp will be encoded into the PES packet. Bits
+    33 ... 63 are discarded.
+
+The function may raise exception *Zvbi.DvbMuxError* upon failures, which
+may occur under the following circumstances:
+
+* The maximum PES packet size, or the value selected with
+  `Zvbi.DvbMux.set_pes_packet_size()`_, is too small to contain all
+  the sliced and raw VBI data.
+* The sliced array is not sorted by ascending line number,
+  except for elements with line number 0 (undefined).
+* An unsupported service was requested for encoding of sliced data,
+* A selected raw data line is not in the allowed ranges listed above.
+* A sliced line within *sliced_buf* contains a physical line number
+  outside the valid range specified above.
+* Parameter *raw_dec* was not specified during instantiation although
+  the *sliced_buf* contains a structure with id `VBI_SLICED_VBI_625`.
+* One or more members of the raw decoder parameters are invalid.
+* A sliced line within *sliced_buf* with id `VBI_SLICED_VBI_625`
+  contains a physical line number outside the ranges defined by *raw_dec*
+  parameters.
+
 
 Zvbi.DvbMux.get_data_identifier()
 ---------------------------------
 
 ::
 
-    mx.get_data_identifier()
+    id = mx.get_data_identifier()
 
 Returns the data_identifier the multiplexer encodes into PES packets.
 
@@ -2798,16 +2777,18 @@ Zvbi.DvbMux.set_data_identifier()
 
 ::
 
-    ok = mx.set_data_identifier(data_identifier)
+    mx.set_data_identifier(data_identifier)
 
-This function can be used to determine the *data_identifier* byte
+This function can be used to specify the *data_identifier* byte
 to be stored in PES packets.
-For compatibility with decoders compliant to EN 300 472 this should
-be a value in the range 0x10 to 0x1F inclusive. The values 0x99
-to 0x9B inclusive as defined in EN 301 775 are also permitted.
-The default data_identifier is 0x10.
 
-Returns 0 if *data_identifier* is outside the valid range.
+For compatibility with decoders compliant to EN 300 472 this should be a
+value in the range 0x10 to 0x1F inclusive. The values 0x99 to 0x9B
+inclusive as defined in EN 301 775 are also permitted.  The default
+data_identifier is 0x10.
+
+The method raises exception *Zvbi.DvbMuxError* if the given identifier is
+outside the valid range.
 
 Zvbi.DvbMux.get_min_pes_packet_size()
 -------------------------------------
@@ -2832,14 +2813,14 @@ Zvbi.DvbMux.set_pes_packet_size()
 
 ::
 
-    ok = mx.set_pes_packet_size(min_size, max_size)
+    mx.set_pes_packet_size(min_size, max_size)
 
 Determines the minimum and maximum total size of PES packets
 generated by the multiplexer, including all header bytes. When
 the data to be stored in a packet is smaller than the minimum size,
 the multiplexer will fill the packet up with stuffing bytes. When
 the data is larger than the maximum size the *feed()* and
-*cor()* functions will fail.
+*coroutine()* functions will fail.
 
 The PES packet size must be a multiple of 184 bytes, in the range 184
 to 65504 bytes inclusive, and this function will round *min_size* up
@@ -2851,67 +2832,204 @@ The default minimum size is 184, the default maximum 65504 bytes. For
 compatibility with decoders compliant to the Teletext buffer model
 defined in EN 300 472 the maximum should not exceed 1472 bytes.
 
-Returns 0 on failure (out of memory)
-
-The next functions provide similar functionality as described above, but
-are special as they work without a *dvb_mux* object.
-Meaning and use of parameters is the same as described above.
+The method raises exception *Zvbi.DvbMuxError* upon failure (out of
+memory).
 
 Zvbi.DvbMux.dvb_multiplex_sliced()
 ----------------------------------
 
+This **static method** converts the sliced VBI data in the *sliced* buffer to
+VBI data units as defined in EN 300 472 and EN 301 775 and stores them in
+*packet* as output buffer.  Thus this function provides a fraction of the
+functionality of the *feed()* method.
+
 ::
 
-    Zvbi.DvbMux.dvb_multiplex_sliced(buf, buffer_left, sliced, sliced_left, service_mask, data_identifier, stuffing)
+    packet_left, sliced_left =
+        Zvbi.DvbMux.dvb_multiplex_sliced(packet, packet_left,
+                                         sliced, sliced_left,
+                                         service_mask,
+                                         data_identifier=0x10, stuffing= False)
 
-Converts the sliced VBI data in the *sliced* buffer to VBI data
-units as defined in EN 300 472 and EN 301 775 and stores them
-in *buf* as output buffer.
+Input parameters:
+
+:packet:
+    This parameter has to be a *bytearray* that is to be filled with the
+    generated packet. The size of the *bytearray* needs to be
+    pre-initialized to the initial value of *packet_left*.
+
+:packet_left:
+    Contains the number of bytes available in the *packet* object. It will
+    be decremented by the cumulative size of the successfully stored data
+    units.
+
+:sliced:
+    This has to be an object of type `Zvbi.CaptureSlicedBuf`_. It contains
+    the sliced VBI data to be converted.
+
+:sliced_left:
+    Indicates initially the number of sliced lines in the *sliced* buffer,
+    or it can be zero.
+
+:service_mask:
+    Only data services in this set will be encoded. Other data services in
+    the *sliced* buffer will be discarded without further checks. Create a
+    set by bit-wise ORing *VBI_SLICED_* values.  The parameter defauls to
+    the set of all allowed services, which are:
+
+    * VBI_SLICED_TELETEXT_B on lines 7 to 22 and 320 to 335 inclusive
+    * VBI_SLICED_VPS on line 16
+    * VBI_SLICED_CAPTION_625 on line 22
+    * VBI_SLICED_WSS_625 on line 23
+
+:data_identifier:
+    When the given value lies in range 0x10 to 0x1F inclusive, the encoded
+    data units will be padded to data_unit_length 0x2C for compatibility
+    with EN 300 472 compliant decoders. The *data_identifier* itself will
+    **not** be stored in the output buffer.
+
+:stuffing:
+    If this optional parameter is specified and set *True*, and space
+    remains in the output buffer after all data has been successfully
+    converted, or *sliced_left* is zero, the function fills the buffer up
+    with stuffing data units.
+
+The function returns a tuple of two values:
+
+0. Returns the value of parameter *packet_left*, decremented by
+   the cumulative size of the successfully stored data units.
+1. Returns the value of parameter *sliced_left* decremented by the number
+   of successfully converted VBI lines in *sliced*
+
+The method raises exception *Zvbi.DvbMuxError* upon failure. The method
+may fail for the following causes:
+
+* *packet_left* is less than 2 (the minimum data unit size is two bytes).
+  The output buffer remains unchanged in this case.
+* The *data_identifier* is in range 0x10 to 0x1F inclusive and
+  *packet_left* is not a multiple of 46. The output buffer remains
+  unchanged in this case.
+* The lines in the *sliced* buffer are not sorted by ascending line
+  number, except for elements with line number 0 (undefined).
+* The service mask contains a serive type that is not one of the allowed
+  types listed above.
+* A sliced line selected by *service_mask* contains a line number outside
+  the valid range specified above.
+
+All errors are recoverable. Just call the function again, possibly after
+skipping the offending sliced line (by reducing the value of
+*sliced_left*), to continue where it left off. Note *packet_left* must be
+at least 2 (or a multiple of 46) in each call.
+
+Simplified example without error checking: ::
+
+    sliced_buf = cap.pull_sliced(1000)
+
+    pkg = bytearray(2024) # multiple of 46
+    pkg_left = len(pkg)
+    sliced_left = len(sliced_buf)
+    pkg_left, sliced_left = \
+        Zvbi.DvbMux.multiplex_sliced(pkg, pkg_left, sliced_buf, sliced_left)
+    del pkg[pkg_left :]
+
+**Note:**
+According to EN 301 775 all lines stored in one PES packet must belong to
+the same video frame (but the data of one frame may be transmitted in
+several successive PES packets). They must be encoded in the same order as
+they would be transmitted in the VBI, no line more than once. Samples may
+have to be split into multiple segments and they must be contiguously
+encoded into adjacent data units. The function cannot enforce this if
+multiple calls are necessary to encode all samples.
 
 Zvbi.DvbMux.dvb_multiplex_raw()
 -------------------------------
 
+This **static method**  converts one line of raw VBI samples in *raw* to one or
+more "monochrome 4:2:2 samples" data units as defined in EN 301 775, and stores
+them in the *buf* output buffer. Thus this function provides a fraction of the
+functionality of the feed() method.
+
 ::
 
-    Zvbi.DvbMux.dvb_multiplex_raw(buf, buffer_left, raw, raw_left, data_identifier, videostd_set, line, first_pixel_position, n_pixels_total, stuffing)
+    packet_left, raw_left =
+        Zvbi.DvbMux.dvb_multiplex_raw(packet, packet_left,
+                                      raw, raw_left,
+                                      data_identifier, videostd_set, line,
+                                      first_pixel_position, n_pixels_total,
+                                      stuffing=False)
 
-Converts one line of raw VBI samples in *raw* to one or more "monochrome
-4:2:2 samples" data units as defined in EN 301 775, and stores
-them in the *buf* output buffer.
+Input parameters:
 
-Parameters:
-*line* The ITU-R line number to be encoded in the data units.
-It must not change until all samples have been encoded.
-*first_pixel_position* The horizontal offset where decoders
-shall insert the first sample in the VBI, counting samples from
-the start of the digital active line as defined in ITU-R BT.601.
-Usually this value is zero and *n_pixels_total* is 720.
-*first_pixel_position* + *n_pixels_total* must not be greater
-than 720. This parameter must not change until all samples have
-been encoded.
-*n_pixels_total* Total size of the raw input buffer in bytes,
-and the total number of samples to be encoded. Initially this
-value must be equal to *raw_left*, and it must not change until
-all samples have been encoded.
-Remaining parameters are the same as described above.
+:data_identifier:
+    When the given value lies in range 0x10 to 0x1F inclusive, the encoded
+    data units will be padded to data_unit_length 0x2C for compatibility
+    with EN 300 472 compliant decoders. The *data_identifier* itself will
+    **not** be stored in the output buffer.
 
-**Note:**
-According to EN 301 775 all lines stored in one PES packet must
-belong to the same video frame (but the data of one frame may be
-transmitted in several successive PES packets). They must be encoded
-in the same order as they would be transmitted in the VBI, no line more
-than once. Samples may have to be split into multiple segments and they
-must be contiguously encoded into adjacent data units. The function
-cannot enforce this if multiple calls are necessary to encode all
-samples.
+:videostd_set:
+   The *line* parameter will be interpreted according to this set of video
+   standards. It must not change until all samples have been encoded. Only
+   one of two values are permitted: *Zvbi.VBI_VIDEOSTD_SET_625_50* or
+   *Zvbi.VBI_VIDEOSTD_SET_525_60*.
 
+:line:
+    The ITU-R line number to be encoded in the data units.
+    It must not change until all samples have been encoded.
+
+:first_pixel_position:
+    The horizontal offset where decoders shall insert the first sample in
+    the VBI, counting samples from the start of the digital active line as
+    defined in ITU-R BT.601.  Usually this value is zero and
+    *n_pixels_total* is 720.  *first_pixel_position* + *n_pixels_total*
+    must not be greater than 720. This parameter must not change until all
+    samples have been encoded.
+
+:n_pixels_total:
+    Total size of the raw input buffer in bytes, and the total number of
+    samples to be encoded. Initially this value must be equal to
+    *raw_left*, and it must not change until all samples have been
+    encoded.
+
+:stuffing:
+    If this optional parameter is specified and set *True*, and space
+    remains in the output buffer after all data has been successfully
+    converted, or *sliced_left* is zero, the function fills the buffer up
+    with stuffing data units.
+
+The function returns a tuple of two values:
+
+0. Returns the value of parameter *packet_left*, decremented by
+   the cumulative size of the successfully stored data units.
+1. Returns the value of parameter *raw_left* decremented by the number of
+   successfully converted samples.
+
+The method raises exception *Zvbi.DvbMuxError* upon failure. The method
+may fail for the following causes:
+
+* *packet_left* is less than two (the minimum data unit size is two bytes).
+* *raw_left* is zero.
+* The *data_identifier* is in range 0x10 to 0x1F inclusive and
+  *packet_left* is not a multiple of 46.
+* The *videostd_set* is ambiguous.
+* The *line* parameter is outside the valid range, that is 7 to
+  23 and 270 to 286 for 525 line standards, 7 to 23 and 320 to 336
+  for 625 line standards. All numbers inclusive.
+* *raw_left* is greater than *n_pixels_total*
+* *first_pixel_position* + *n_pixels_total* is greater than 720.
+
+The output buffer remains unchanged on all errors.
 
 .. _Zvbi.DvbDemux:
 
 Class Zvbi.DvbDemux
 ===================
 
-Separating VBI data from a DVB PES stream (EN 301 472, EN 301 775).
+This class extracts sliced VBI data from a DVB Packetized Elementary
+Stream (PES) or Transport Stream (TS) as defined in EN 300 472 "Digital
+Video Broadcasting (DVB); Specification for conveying ITU-R System B
+Teletext in DVB bitstreams" and EN 301 775 "Digital Video Broadcasting
+(DVB); Specification for the carriage of Vertical Blanking Information
+(VBI) data in DVB bitstreams".
 
 Constructor Zvbi.DvbDemux
 -------------------------
@@ -2920,15 +3038,15 @@ Constructor Zvbi.DvbDemux
 
     dvb = Zvbi.DvbDemux( [callback [, user_data]] )
 
-Creates a new DVB VBI demultiplexer context taking a PES stream as input.
-Returns a reference to the newly allocated DVB demux context.
+Creates and returns a new DVB VBI demultiplexer context taking a PES
+stream as input.
 
-The optional callback parameters should only be present if decoding will
-occur via the *dvb>feed()* method.  The function referenced by
-*callback* will be called inside of *dvb.feed()* whenever
-new sliced data is available. Optional parameter *user_data* is
-appended to the callback parameters. See *dvb>feed()* for
-additional details.
+When the optional callback parameter is present, it will be called from
+inside of method *feed* whenever a complete sliced data of a VBI frame is
+available during de-multiplexing the provided stream data. Optional
+parameter *user_data* is appended to the callback's parameter list, if
+present.  When the callback parameter is omitted, VBI data has to be
+extracted via iteration. See *dvb.feed()* for additional details.
 
 Zvbi.DvbDemux.reset()
 ---------------------
@@ -2940,75 +3058,58 @@ Zvbi.DvbDemux.reset()
 Resets the DVB demux to the initial state as after creation.
 Intended to be used after channel changes.
 
-Zvbi.DvbDemux.coroutine()
--------------------------
-
-::
-
-    n_lines = dvb.coroutine(sliced, sliced_lines, pts, buf, buf_left)
-
-This function takes an arbitrary number of DVB PES data bytes in *buf*,
-filters out *PRIVATE_STREAM_1* packets, filters out valid VBI data units,
-converts them to sliced buffer format and stores the data at *sliced*.
-Usually the function will be called in a loop:
-
-::
-
-  left = len(buffer)
-  while left > 0:
-    n_lines = dvb.cor(sliced, 64, pts, buffer, left)
-    if n_lines > 0:
-      vt.decode(sliced, n_lines, pts_conv(pts))
-
-Input parameters: *buf* contains data read from a DVB device (needs
-not align with packet boundaries.)  Note you must not modify the buffer
-until all data is processed as indicated by *buf_left* being zero
-(unless you remove processed data and reset the left count to zero.)
-*buffer_left* specifies the number of unprocessed bytes (at the end
-of the buffer.)  This value is decremented in each call by the number
-of processed bytes. Note the packet filter works faster with larger
-buffers. *sliced_lines* specifies the maximum number of sliced lines
-expected as result.
-
-Returns the number of sliced lines stored in *sliced*. May be zero
-if more data is needed or the data contains errors. Demultiplexed sliced
-data is stored in *sliced*.  You must not change the contents until
-a frame is complete (i.e. the function returns a non-zero value.)
-*pts* returns the Presentation Time Stamp associated with the
-first line of the demultiplexed frame.
-
-Note: Demultiplexing of raw VBI data is not supported;
-any raw data present in the stream will be discarded.
-
 Zvbi.DvbDemux.feed()
 --------------------
 
 ::
 
-    ok = dvb.feed(buf)
+    dvb.feed(buf)
 
 This function takes an arbitrary number of DVB PES data bytes in *buf*,
 filters out *PRIVATE_STREAM_1* packets, filters out valid VBI data units,
-converts them to vbi_sliced format and calls the callback function given
-during creation of the context. Returns 0 if the data contained errors.
-
-The function is similar to *dvb.cor()*, but uses an internal
-buffer for sliced data.  Since this function does not return sliced
-data, it's only useful if you have installed a handler. Do not mix
-calls to this function with *dvb.cor()*.
-
-The callback function is called with the following parameters: ::
-
-  ok = callback(sliced_buffer, pts, user_data);
-
-*sliced* is a reference to a buffer holding sliced data; the reference
-has the same type as returned by capture functions. *n_lines* specifies
-the number of valid lines in the buffer. *pts* is the timestamp.
-The last parameter is *user_data*, if given during creation.
-The handler should return 1 on success, 0 on failure.
+converts them to format of C structure *vbi_sliced* (used internally in
+the library).  The function may raise exception *Zvbi.DvbDemuxError* if
+the data contained errors. When a callback is configured, the exception
+is also raised if the callback function returned value *False*.
 
 Note: Demultiplexing of raw VBI data is not supported;
 any raw data present in the stream will be discarded.
+
+**Usage with a callback function:**
+
+When the de-multiplexer was intiantiated with a callback function
+parameter, the *feed* function invokes the callback for each completed VBI
+frame before it returns. The callback is invoked with the following
+signature: ::
+
+    ok = callback(sliced_buffer, pts, user_data)
+
+The handler function has to return *True* on success, *False*. on failure.
+Parameters have the following meaning:
+
+* *sliced_buffer* is an object of type `Zvbi.CaptureSlicedBuf`_,
+  containing the sliced data and attributes (i.e. this is the same
+  type as returned by `Zvbi.Capture`_ methods). Note the object passed
+  here is valid only for the duration of the callback execution.
+* *pts* is the timestamp.
+* *user_data* loops back the object passed via *user_data* parameter
+  to the constructor. If not specified there, this parameter is omitted
+  here.
+
+**Usage without a callback function:**
+
+When the de-multiplexer was intiantiated without a callback function
+parameter, the *feed* function only stores a reference to the given input
+buffer. Actual de-multiplexing is done when the object is used as an
+iterator. The iteration has to be completed before feeding new data.
+
+Example usage for this mode: ::
+
+    dvb.feed(buf)
+    for sliced_buf in dvb:
+        sliced_handler(sliced_buf, sliced_buf.timestamp)
+
+See also `examples/dvb-mux.py` for a working example.
 
 Zvbi.DvbDemux.set_log_fn()
 --------------------------
@@ -3044,6 +3145,9 @@ Class Zvbi.IdlDemux
 The functions in this section decode data transmissions in
 Teletext **Independent Data Line** packets (EN 300 708 section 6),
 i.e. data transmissions based on packet 8/30.
+
+**Note this class is not implemented in the Python module as this service
+is believed to be obsolete.**
 
 Constructor Zvbi.IdlDemux()
 ---------------------------
@@ -3110,6 +3214,9 @@ Separating data transmitted in Page Function Clear Teletext packets
 (ETS 300 708 section 4), i.e. using regular packets on a dedicated
 teletext page.
 
+**Note this class is not implemented in the Python module as this service
+is believed to be obsolete.**
+
 Constructor Zvbi.PfcDemux()
 ---------------------------
 
@@ -3148,11 +3255,13 @@ page in an internal buffer. When a data block is complete it calls
 the handler given during creation.
 
 The handler is called with the following parameters:
-*pgno* is the page number given during creation;
-*stream* is the stream in which the block was received;
-*application_id* is the application ID of the block;
-*block* is a scalar holding the block's data;
-optional *user_data* is passed through from the creation.
+
+* *pgno* is the page number given during creation.
+* *stream* is the stream in which the block was received.
+* *application_id* is the application ID of the block.
+* *block* is a scalar holding the block's data.
+* Optional *user_data* is looped back here, if specified in the
+  *PfcDemux* constructor.
 
 Zvbi.PfcDemux.feed_frame()
 --------------------------
@@ -3174,6 +3283,9 @@ Class Zvbi.XdsDemux
 
 Separating "Extended Data Service" (XDS) from a Closed Caption stream (EIA
 608).
+
+**Note this class is not implemented in the Python module as this service
+is believed to be obsolete.**
 
 Constructor Zvbi.XdsDemux()
 ---------------------------
@@ -3500,7 +3612,7 @@ Zvbi.vbi_decode_vps_cni()
     cni = Zvbi.decode_vps_cni(data)
 
 This function receives a sliced VPS line and returns a 16-bit CNI value,
-or undef in case of errors.
+or raises exception *ZvbiError* in case of errors.
 
 Zvbi.vbi_encode_vps_cni()
 -------------------------
@@ -3684,11 +3796,21 @@ functions. You can also use them as examples for your code:
 
 :dvb-mux.py:
     Example for the use of class `Zvbi.DvbMux`_.
-    This script is a small example for use of the DVD multiplexer functions
-    The scripts captures teletext from an analog VBI device and generates
-    a PES or TS stream on STDOUT.  Output can be decoded with ::
+    This script is a small example for use of the DVB multiplexer
+    functions.  The scripts captures teletext from an analog VBI device
+    and generates a PES or TS stream on STDOUT. Output can be decoded
+    with ::
 
         ./decode.py --pes --all < dvb_mux.out
+
+:dvb-demux.py:
+    Example for the use of class `Zvbi.DvbDemux`_.
+    This script is a small example for use of the DVB de-multiplexer
+    functions. The function opens the DVB device and dumps all received
+    VBI data. The output can be decoded equivalently to that of
+    capture.py, which is ::
+
+      ./dvb-demux.py --pid NNN --sliced | ./decode --ttx
 
 Authors
 =======

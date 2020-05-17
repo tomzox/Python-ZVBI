@@ -128,7 +128,7 @@ PyObject * ZvbiCaptureRawBuf_MappingSubscript(ZvbiCaptureBufObj * self, PyObject
 static PyObject *
 ZvbiCaptureSlicedBuf_Iter(ZvbiCaptureBufObj *self)
 {
-    Py_INCREF(self);
+    Py_INCREF(self);  // Note corresponding DECREF is done by caller after end of iteration
     self->iter_idx = 0;
     return (PyObject *) self;
 }

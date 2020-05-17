@@ -22,7 +22,7 @@
 /*
  * Structure which is used to store callback function references and user data.
  * Required because we need to replace the callback function pointer given to
- * the C library with a wrapper function which invokes the Perl interpreter.
+ * the C library with a wrapper function which invokes the Python interpreter.
  */
 typedef struct
 {

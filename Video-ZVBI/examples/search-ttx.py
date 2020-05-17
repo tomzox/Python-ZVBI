@@ -18,7 +18,7 @@
 #  along with this program; if not, write to the Free Software
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #
-# #Perl-Id: search-ttx.pl,v 1.3 2020/04/01 07:34:29 tom Exp tom #
+# Perl #Id: search-ttx.pl,v 1.3 2020/04/01 07:34:29 tom Exp tom #
 
 import sys
 import select

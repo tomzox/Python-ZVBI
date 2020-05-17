@@ -18,19 +18,42 @@
 #include <libzvbi.h>
 
 #include "zvbi_dvb_demux.h"
+#include "zvbi_capture_buf.h"
+#include "zvbi_callbacks.h"
 
-#if 0
 // ---------------------------------------------------------------------------
 //  DVB demultiplexer
 // ---------------------------------------------------------------------------
 
+// MPEG presentation timestamp has resolution of 90 kHz, while VBI timestamps
+// use seconds-since 1970-Jan-01. As normally timestamps are only used for
+// calculating delta, simply converting timer resolution should suffice.
+#define PTS_TO_TIMESTAMP(PTS) ((PTS) / 90000.0)
+
+// FIXME make this configurable
+// Default for the maximum number of sliced lines per frame (in iterator mode)
+#define SLICED_LINE_CNT 64
+
 typedef struct vbi_dvb_demux_obj_struct {
-        vbi_dvb_demux * ctx;
-        SV *            demux_cb;
-        SV *            demux_user_data;
-        SV *            log_cb;
-        SV *            log_user_data;
-} VbiDvb_DemuxObj;
+    PyObject_HEAD
+    vbi_dvb_demux * ctx;
+
+    PyObject *      log_cb;
+    PyObject *      log_user_data;
+
+    // members for use in callback mode
+    PyObject *      demux_cb;
+    PyObject *      demux_user_data;
+
+    // members for use in iterator mode (called "coroutine" in libzvbi)
+    Py_buffer       feed_buf;
+    const uint8_t * p_feed_buf_src;
+    unsigned int    feed_buf_left;
+    vbi_sliced *    p_sliced_buf;
+
+} ZvbiDvbDemuxObj;
+
+static PyObject * ZvbiDvbDemuxError;
 
 // ---------------------------------------------------------------------------
 
@@ -45,48 +68,38 @@ zvbi_xs_dvb_pes_handler( vbi_dvb_demux *        dx,
                          unsigned int           sliced_lines,
                          int64_t                pts)
 {
-        VbiDvb_DemuxObj * ctx = user_data;
-        vbi_capture_buffer buffer;
-        SV * sv_sliced;
+    ZvbiDvbDemuxObj * self = user_data;
+    vbi_bool result = FALSE; /* defaults to "failure" result */
 
-        I32  count;
-        vbi_bool result = FALSE; /* defaults to "failure" result */
+    if ((self != NULL) && (self->demux_cb != NULL)) {
+        vbi_capture_buffer cap_buf;
+        cap_buf.data = (void*)sliced;  /* cast removes "const" */
+        cap_buf.size = sizeof(vbi_sliced) * sliced_lines;
+        cap_buf.timestamp = PTS_TO_TIMESTAMP(pts);
 
-        if ((ctx != NULL) && (ctx->demux_cb != NULL)) {
-                dSP ;
-                ENTER ;
-                SAVETMPS ;
+        // FIXME allocate from heap - safe in case of ref-cnt violation after call return
+        PyObject * sliced_obj = ZvbiCaptureSlicedBuf_FromPtr(&cap_buf);
+        if (sliced_obj != NULL) {
+            // invoke the Python subroutine
+            PyObject * cb_rslt =
+                PyObject_CallFunctionObjArgs(self->demux_cb, sliced_obj, self->demux_user_data);
 
-                buffer.data = (void*)sliced;  /* cast removes "const" */
-                buffer.size = sizeof(vbi_sliced) * sliced_lines;
-                buffer.timestamp = pts * 90000.0;
-
-                sv_sliced = newSV(0);
-                sv_setref_pv(sv_sliced, "VbiSlicedBufferPtr", (void*)&buffer);
-
-                /* push the function parameters on the Perl interpreter stack */
-                PUSHMARK(SP) ;
-                XPUSHs(sv_2mortal (sv_sliced));
-                XPUSHs(sv_2mortal (newSVuv (sliced_lines)));
-                XPUSHs(sv_2mortal (newSViv (pts)));
-                if (ctx->demux_user_data != NULL) {
-                        XPUSHs(ctx->demux_user_data);
-                }
-                PUTBACK ;
-
-                /* invoke the Perl subroutine */
-                count = call_sv(ctx->demux_cb, G_SCALAR) ;
-
-                SPAGAIN ;
-
-                if (count == 1) {
-                        result = !! POPi;
-                }
-
-                FREETMPS ;
-                LEAVE ;
+            // evaluate the boolean result
+            if (cb_rslt != NULL) {
+                result = (PyObject_IsTrue(cb_rslt) == 1);
+                Py_DECREF(cb_rslt);
+            }
+            // TODO croak if Py_REFCNT(sliced_obj) not one
+            Py_DECREF(sliced_obj);
         }
-        return result;
+
+        // clear exceptions as we cannot handle them here
+        if (PyErr_Occurred() != NULL) {
+            PyErr_Print();
+        }
+
+    }
+    return result;
 }
 
 void
@@ -95,154 +108,338 @@ zvbi_xs_dvb_log_handler( vbi_log_mask           level,
                          const char *           message,
                          void *                 user_data)
 {
-        VbiDvb_DemuxObj * ctx = user_data;
-        I32  count;
+    ZvbiDvbDemuxObj * self = user_data;
+    PyObject * cb_rslt;
 
-        if ((ctx != NULL) && (ctx->log_cb != NULL)) {
-                dSP ;
-                ENTER ;
-                SAVETMPS ;
-
-                /* push all function parameters on the Perl interpreter stack */
-                PUSHMARK(SP) ;
-                XPUSHs(sv_2mortal (newSViv (level)));
-                mXPUSHp(context, strlen(context));
-                mXPUSHp(message, strlen(message));
-                if (ctx->log_user_data != NULL) {
-                        XPUSHs(ctx->log_user_data);
-                }
-                PUTBACK ;
-
-                /* invoke the Perl subroutine */
-                count = call_sv(ctx->log_cb, G_SCALAR) ;
-
-                SPAGAIN ;
-
-                FREETMPS ;
-                LEAVE ;
+    if ((self != NULL) && (self->log_cb != NULL)) {
+        // invoke the Python subroutine with parameters
+        if (self->log_user_data != NULL) {
+            cb_rslt = PyObject_CallFunction(self->log_cb, "iss",
+                                            level, context, message, self->log_user_data);
         }
+        else {
+            cb_rslt = PyObject_CallFunction(self->log_cb, "iss",
+                                            level, context, message);
+        }
+
+        // discard result
+        if (cb_rslt != NULL) {
+            Py_DECREF(cb_rslt);
+        }
+
+        // clear exceptions as we cannot handle them here
+        if (PyErr_Occurred() != NULL) {
+            PyErr_Print();
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
 
-VbiDvb_DemuxObj *
-pes_new(callback=NULL, user_data=NULL)
-        CV *                   callback
-        SV *                   user_data
-        CODE:
-        Newxz(RETVAL, 1, VbiDvb_DemuxObj);
+static PyObject *
+ZvbiDvbDemux_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+    return type->tp_alloc(type, 0);
+}
+
+static void
+ZvbiDvbDemux_dealloc(ZvbiDvbDemuxObj *self)
+{
+    if (self->ctx) {
+        vbi_dvb_demux_delete(self->ctx);
+    }
+
+    if (self->demux_cb != NULL) {
+        Py_DECREF(self->demux_cb);
+    }
+    if (self->demux_user_data != NULL) {
+        Py_DECREF(self->demux_user_data);
+    }
+    if (self->log_cb != NULL) {
+        Py_DECREF(self->log_cb);
+    }
+    if (self->log_user_data != NULL) {
+        Py_DECREF(self->log_user_data);
+    }
+
+    if (self->p_sliced_buf != NULL) {
+        PyMem_RawFree(self->p_sliced_buf);
+    }
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
+}
+
+static int
+ZvbiDvbDemux_init(ZvbiDvbDemuxObj *self, PyObject *args, PyObject *kwds)
+{
+    static char * kwlist[] = {"callback", "user_data", NULL};
+    PyObject * callback = NULL;
+    PyObject * user_data = NULL;
+
+    // reset state in case the module is already initialized
+    if (self->ctx) {
+        vbi_dvb_demux_delete(self->ctx);
+
+        if (self->demux_cb != NULL) {
+            Py_DECREF(self->demux_cb);
+            self->demux_cb = NULL;
+        }
+        if (self->demux_user_data != NULL) {
+            Py_DECREF(self->demux_user_data);
+            self->demux_user_data = NULL;
+        }
+        if (self->log_cb != NULL) {
+            Py_DECREF(self->log_cb);
+            self->log_cb = NULL;
+        }
+        if (self->log_user_data != NULL) {
+            Py_DECREF(self->log_user_data);
+            self->log_user_data = NULL;
+        }
+        if (self->p_sliced_buf != NULL) {
+            PyMem_RawFree(self->p_sliced_buf);
+            self->p_sliced_buf = NULL;
+        }
+        self->ctx = NULL;
+    }
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$OO", kwlist,
+                                     &callback, &user_data))
+    {
+        return -1;
+    }
+
+    if (callback != NULL) {
+        self->ctx = vbi_dvb_pes_demux_new(zvbi_xs_dvb_pes_handler, self);
+    }
+    else {
+        self->ctx = vbi_dvb_pes_demux_new(NULL, NULL);
+    }
+
+    int RETVAL = -1;
+    if (self->ctx != NULL) {
         if (callback != NULL) {
-                RETVAL->ctx = vbi_dvb_pes_demux_new(zvbi_xs_dvb_pes_handler, RETVAL);
-                if (RETVAL->ctx != NULL) {
-                        RETVAL->demux_cb = SvREFCNT_inc(callback);
-                        RETVAL->demux_user_data = SvREFCNT_inc(user_data);
+            self->demux_cb = callback;
+            Py_INCREF(callback);
+        }
+        if (self->demux_user_data != NULL) {
+            self->demux_user_data = user_data;
+            Py_INCREF(user_data);
+        }
+        RETVAL = 0;
+    }
+    else {
+        PyErr_SetString(ZvbiDvbDemuxError, "Initialization failed");
+    }
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiDvbDemux_reset(ZvbiDvbDemuxObj *self, PyObject *args)
+{
+    vbi_dvb_demux_reset(self->ctx);
+
+    if (self->feed_buf_left != 0) {
+        PyBuffer_Release(&self->feed_buf);
+        self->feed_buf.buf = NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+ZvbiDvbDemux_feed(ZvbiDvbDemuxObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+
+    if ((self->demux_cb != NULL) || (self->feed_buf.buf == NULL)) {
+        if (PyArg_ParseTuple(args, "y*", &self->feed_buf)) {
+            if (self->demux_cb != NULL) {
+                // Callback mode of operation: process all VBI data in one pass
+                if (vbi_dvb_demux_feed(self->ctx, self->feed_buf.buf, self->feed_buf.len)) {
+                    RETVAL = Py_None;
+                    Py_INCREF(Py_None);
                 }
-        } else {
-                RETVAL->ctx = vbi_dvb_pes_demux_new(NULL, NULL);
-        }
-        if (RETVAL->ctx == NULL) {
-                Safefree(RETVAL);
-                RETVAL = NULL;
-        }
-        OUTPUT:
-        RETVAL
-
-void
-DESTROY(dx)
-        VbiDvb_DemuxObj *       dx
-        CODE:
-        vbi_dvb_demux_delete(dx->ctx);
-        Save_SvREFCNT_dec(dx->demux_cb);
-        Save_SvREFCNT_dec(dx->demux_user_data);
-        Save_SvREFCNT_dec(dx->log_cb);
-        Save_SvREFCNT_dec(dx->log_user_data);
-        Safefree(dx);
-
-void
-vbi_dvb_demux_reset(dx)
-        VbiDvb_DemuxObj *       dx
-        CODE:
-        vbi_dvb_demux_reset(dx->ctx);
-
-unsigned int
-vbi_dvb_demux_cor(dx, sv_sliced, sliced_lines, pts, sv_buf, buf_left)
-        VbiDvb_DemuxObj *       dx
-        SV *                    sv_sliced
-        unsigned int            sliced_lines
-        int64_t                 &pts = NO_INIT
-        SV *                    sv_buf
-        unsigned int            buf_left
-        PREINIT:
-        STRLEN buf_size;
-        const uint8_t * p_buf;
-        vbi_sliced * p_sliced;
-        size_t size_sliced;
-        CODE:
-        if (dx->demux_cb != NULL) {
-                croak("Use of the cor method is not supported in dvb_demux contexts with handler function");
-
-        } else if (SvOK(sv_buf)) {
-                p_buf = (void *) SvPV(sv_buf, buf_size);
-                if (buf_left <= buf_size) {
-                        p_buf += buf_size - buf_left;
-
-                        size_sliced = sliced_lines * sizeof(vbi_sliced);
-                        p_sliced = (void *)zvbi_xs_sv_buffer_prep(sv_sliced, size_sliced);
-
-                        RETVAL = vbi_dvb_demux_cor(dx->ctx, p_sliced, sliced_lines, &pts,
-                                                   &p_buf, &buf_left);
-                } else {
-                        croak("Input buffer size %d is less than left count %d", (int)buf_size, (int)buf_left);
-                        RETVAL = 0;
+                else {
+                    PyErr_SetString(ZvbiDvbDemuxError, "demux failure");
                 }
-        } else {
-                croak("Input buffer is undefined or not a scalar");
-                RETVAL = 0;
+                PyBuffer_Release(&self->feed_buf);
+                self->feed_buf.buf = NULL;
+            }
+            else {
+                // Iteration mode: only store reference to the buffer
+                // data will be processed by following iteration
+                assert(self->feed_buf.buf != NULL);
+                self->feed_buf_left = self->feed_buf.len;
+                self->p_feed_buf_src = (const uint8_t*) self->feed_buf.buf;
+                //self->p_sliced_buf allocated on demand during iteration
+
+                RETVAL = Py_None;
+                Py_INCREF(Py_None);
+            }
         }
-        OUTPUT:
-        sv_sliced
-        pts
-        buf_left
-        RETVAL
+    }
+    else {
+        PyErr_SetString(ZvbiDvbDemuxError, "Previous feed buffer not drained via iteration yet");
+    }
+    return RETVAL;
+}
 
-vbi_bool
-vbi_dvb_demux_feed(dx, sv_buf)
-        VbiDvb_DemuxObj *       dx
-        SV *                    sv_buf
-        PREINIT:
-        STRLEN buf_size;
-        uint8_t * p_buf;
-        CODE:
-        if (dx->demux_cb == NULL) {
-                croak("Use of the feed method is not possible in dvb_demux contexts without handler function");
+/*
+ * Implementation of the standard "__iter__" function
+ */
+static ZvbiDvbDemuxObj *
+ZvbiDvbDemux_Iter(ZvbiDvbDemuxObj *self)
+{
+    ZvbiDvbDemuxObj * RETVAL = NULL;
 
-        } else if (SvOK(sv_buf)) {
-                p_buf = (uint8_t *) SvPV(sv_buf, buf_size);
-                RETVAL = vbi_dvb_demux_feed(dx->ctx, p_buf, buf_size);
-        } else {
-                croak("Input buffer is undefined or not a scalar");
-                RETVAL = FALSE;
+    if ((self->demux_cb == NULL) && (self->feed_buf.buf != NULL)) {
+        // Note corresponding DECREF is done by caller after end of iteration
+        Py_INCREF(self);
+        RETVAL = self;
+    }
+    else {
+        if (self->demux_cb != NULL) {
+            PyErr_SetString(PyExc_TypeError, "DvbDemux instance is configured for use with callback instead of iteration");
         }
-        OUTPUT:
-        RETVAL
+        else {
+            PyErr_SetString(PyExc_IndexError, "Feed is empty");
+        }
+    }
+    return RETVAL;
+}
 
-void
-vbi_dvb_demux_set_log_fn(dx, mask, log_fn=NULL, user_data=NULL)
-        VbiDvb_DemuxObj *       dx
-        int                     mask
-        CV *                    log_fn
-        SV *                    user_data
-        CODE:
-        Save_SvREFCNT_dec(dx->log_cb);
-        Save_SvREFCNT_dec(dx->log_user_data);
-        if (log_fn != NULL) {
-                dx->log_cb = SvREFCNT_inc(log_fn);
-                dx->demux_user_data = SvREFCNT_inc(user_data);
-                vbi_dvb_demux_set_log_fn(dx->ctx, mask, zvbi_xs_dvb_log_handler, dx);
-        } else {
-                dx->log_cb = NULL;
-                dx->log_user_data = NULL;
-                vbi_dvb_demux_set_log_fn(dx->ctx, mask, NULL, NULL);
+/*
+ * Implementation of the standard "__next__" function
+ */
+static PyObject *
+ZvbiDvbDemux_IterNext(ZvbiDvbDemuxObj *self)
+{
+    PyObject * RETVAL = NULL;
+    unsigned n_lines = 0;
+
+    if (self->feed_buf.buf != NULL) {
+        if (self->feed_buf_left > 0) {
+            if (self->p_sliced_buf == NULL) {
+                self->p_sliced_buf = PyMem_RawMalloc(sizeof(vbi_sliced) * SLICED_LINE_CNT);
+            }
+            int64_t pts;
+            n_lines = vbi_dvb_demux_cor(self->ctx,
+                                        self->p_sliced_buf, SLICED_LINE_CNT, &pts,
+                                        &self->p_feed_buf_src, &self->feed_buf_left);
+            if (n_lines > 0) {
+                RETVAL = ZvbiCaptureSlicedBuf_FromData(self->p_sliced_buf, n_lines,
+                                                       PTS_TO_TIMESTAMP(pts));
+                self->p_sliced_buf = NULL;  // now owned by RETVAL object
+            }
+            else {
+                assert(self->feed_buf_left == 0);
+            }
+        }
+        if (self->feed_buf_left == 0) {
+            PyBuffer_Release(&self->feed_buf);
+            self->feed_buf.buf = NULL;
+            // keep possibly still allocated p_sliced_buf for next iteration
+        }
+    }
+    if (n_lines == 0) {
+        PyErr_SetNone(PyExc_StopIteration);
+    }
+    return RETVAL;
+}
+
+
+static PyObject *
+ZvbiDvbDemux_set_log_fn(ZvbiDvbDemuxObj *self, PyObject *args)
+{
+    int mask = 0;
+    PyObject * callback = NULL;
+    PyObject * user_data = NULL;
+    PyObject * RETVAL = NULL;
+
+    if (PyArg_ParseTuple(args, "I|OO", &mask, &callback, &user_data)) {
+        if (self->log_cb != NULL) {
+            Py_DECREF(self->log_cb);
+            self->log_cb = NULL;
+        }
+        if (self->log_user_data != NULL) {
+            Py_DECREF(self->log_user_data);
+            self->log_user_data = NULL;
         }
 
-#endif // 0
+        if (callback != NULL) {
+            if (callback != NULL) {
+                self->log_cb = callback;
+                Py_INCREF(callback);
+            }
+            if (self->log_user_data != NULL) {
+                self->log_user_data = user_data;
+                Py_INCREF(user_data);
+            }
+            vbi_dvb_demux_set_log_fn(self->ctx, mask, zvbi_xs_dvb_log_handler, self);
+        }
+        else {
+            vbi_dvb_demux_set_log_fn(self->ctx, mask, NULL, NULL);
+        }
+        RETVAL = Py_None;
+        Py_INCREF(Py_None);
+    }
+    return RETVAL;
+}
+
+
+// ---------------------------------------------------------------------------
+
+static PyMethodDef ZvbiDvbDemux_MethodsDef[] =
+{
+    {"reset",      (PyCFunction) ZvbiDvbDemux_reset,      METH_NOARGS, NULL },
+    {"feed",       (PyCFunction) ZvbiDvbDemux_feed,       METH_VARARGS, NULL },
+    {"set_log_fn", (PyCFunction) ZvbiDvbDemux_set_log_fn, METH_VARARGS, NULL },
+
+    {NULL}  /* Sentinel */
+};
+
+PyTypeObject ZvbiDvbDemuxTypeDef =
+{
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "Zvbi.DvbDemux",
+    .tp_doc = PyDoc_STR("Class for extracting VBI data from a DVB stream"),
+    .tp_basicsize = sizeof(ZvbiDvbDemuxObj),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = ZvbiDvbDemux_new,
+    .tp_init = (initproc) ZvbiDvbDemux_init,
+    .tp_dealloc = (destructor) ZvbiDvbDemux_dealloc,
+    //.tp_repr = (PyObject * (*)(PyObject*)) ZvbiDvbDemux_Repr,
+    .tp_methods = ZvbiDvbDemux_MethodsDef,
+    //.tp_members = ZvbiDvbDemux_Members,
+    .tp_iter = (getiterfunc) ZvbiDvbDemux_Iter,
+    .tp_iternext = (iternextfunc) ZvbiDvbDemux_IterNext,
+};
+
+int PyInit_DvbDemux(PyObject * module, PyObject * error_base)
+{
+    if (PyType_Ready(&ZvbiDvbDemuxTypeDef) < 0) {
+        return -1;
+    }
+
+    // create exception class
+    ZvbiDvbDemuxError = PyErr_NewException("Zvbi.DvbDemuxError", error_base, NULL);
+    Py_XINCREF(ZvbiDvbDemuxError);
+    if (PyModule_AddObject(module, "DvbDemuxError", ZvbiDvbDemuxError) < 0) {
+        Py_XDECREF(ZvbiDvbDemuxError);
+        Py_CLEAR(ZvbiDvbDemuxError);
+        Py_DECREF(module);
+        return -1;
+    }
+
+    // create class type object
+    Py_INCREF(&ZvbiDvbDemuxTypeDef);
+    if (PyModule_AddObject(module, "DvbDemux", (PyObject *) &ZvbiDvbDemuxTypeDef) < 0) {
+        Py_DECREF(&ZvbiDvbDemuxTypeDef);
+        Py_XDECREF(ZvbiDvbDemuxError);
+        Py_CLEAR(ZvbiDvbDemuxError);
+        return -1;
+    }
+
+    return 0;
+}

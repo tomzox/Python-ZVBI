@@ -18,17 +18,38 @@
 #include <libzvbi.h>
 
 #include "zvbi_dvb_mux.h"
+#include "zvbi_capture_buf.h"
+#include "zvbi_raw_params.h"
+#include "zvbi_callbacks.h"
 
-#if 0
 // ---------------------------------------------------------------------------
 //  DVB multiplexer
 // ---------------------------------------------------------------------------
 
+// FIXME make this configurable
+// Default for packet output buffer size (in iterator mode)
+#define OUTPUT_BUF_SIZE 2048
+
 typedef struct vbi_dvb_mux_obj_struct {
-        vbi_dvb_mux *   ctx;
-        SV *            mux_cb;
-        SV *            mux_user_data;
-} VbiDvb_MuxObj;
+    PyObject_HEAD
+    vbi_dvb_mux *   ctx;
+    PyObject *      raw_params;
+
+    // members for use in callback mode
+    PyObject *      mux_cb;
+    PyObject *      mux_user_data;
+
+    // members for use in iterator mode (called "coroutine" in libzvbi)
+    PyObject *      raw_buf_obj;
+    PyObject *      sliced_buf_obj;
+    const vbi_sliced * p_sliced_buf;
+    unsigned        sliced_left;
+    PyObject *      buffer_obj;
+    unsigned        feed_service_mask;
+    int64_t         feed_pts;
+} ZvbiDvbMuxObj;
+
+static PyObject * ZvbiDvbMuxError;
 
 // ---------------------------------------------------------------------------
 
@@ -36,380 +57,576 @@ typedef struct vbi_dvb_mux_obj_struct {
  * Invoke callback in DVB PES and TS multiplexer to process generated
  * packets. Callback can return FALSE to discard remaining data.
  */
-vbi_bool
+static vbi_bool
 zvbi_xs_dvb_mux_handler( vbi_dvb_mux *          mx,
                          void *                 user_data,
                          const uint8_t *        packet,
                          unsigned int           packet_size )
 {
-        VbiDvb_MuxObj * ctx = user_data;
-        I32  count;
-        vbi_bool result = FALSE; /* defaults to "failure" result */
+    ZvbiDvbMuxObj * self = user_data;
+    vbi_bool result = FALSE; /* defaults to "failure" result */
 
-        if ((ctx != NULL) && (ctx->mux_cb != NULL)) {
-                dSP ;
-                ENTER ;
-                SAVETMPS ;
+    if ((self != NULL) && (self->mux_cb != NULL)) {
+        // generate parameter object
+        PyObject * pkg_obj = PyBytes_FromStringAndSize((char*)packet, packet_size);
+        if (pkg_obj) {
+            // invoke the Python subroutine
+            PyObject * cb_rslt =
+                PyObject_CallFunctionObjArgs(self->mux_cb, pkg_obj, self->mux_user_data);
 
-                /* push the function parameters on the Perl interpreter stack */
-                PUSHMARK(SP) ;
-                XPUSHs(sv_2mortal (newSVpvn ((char*)packet, packet_size)));
-                if (ctx->mux_user_data != NULL) {
-                        XPUSHs(ctx->mux_user_data);
-                }
-                PUTBACK ;
-
-                /* invoke the Perl subroutine */
-                count = call_sv(ctx->mux_cb, G_SCALAR) ;
-
-                SPAGAIN ;
-
-                if (count == 1) {
-                        result = !! POPi;
-                }
-
-                FREETMPS ;
-                LEAVE ;
+            // evaluate the result returned by the function
+            if (cb_rslt) {
+                result = (PyObject_IsTrue(cb_rslt) == 1);
+            }
+            Py_DECREF(pkg_obj);
         }
-        return result;
+
+        // clear exceptions as we cannot handle them here
+        if (PyErr_Occurred() != NULL) {
+            PyErr_Print();
+        }
+    }
+    return result;
 }
 
 // ---------------------------------------------------------------------------
 
-VbiDvb_MuxObj *
-pes_new(callback=NULL, user_data=NULL)
-        CV *            callback
-        SV *            user_data
-        CODE:
-        Newxz(RETVAL, 1, VbiDvb_MuxObj);
+static PyObject *
+ZvbiDvbMux_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+    return type->tp_alloc(type, 0);
+}
+
+static void
+ZvbiDvbMux_dealloc(ZvbiDvbMuxObj *self)
+{
+    if (self->ctx) {
+        vbi_dvb_mux_delete(self->ctx);
+
+        if (self->mux_cb != NULL) {
+            Py_DECREF(self->mux_cb);
+        }
+        if (self->mux_user_data != NULL) {
+            Py_DECREF(self->mux_user_data);
+        }
+        if (self->raw_params != NULL) {
+            Py_DECREF(self->raw_params);
+        }
+    }
+    Py_TYPE(self)->tp_free((PyObject *) self);
+}
+
+static int
+ZvbiDvbMux_init(ZvbiDvbMuxObj *self, PyObject *args, PyObject *kwds)
+{
+    static char * kwlist[] = {"pes", "ts_pid", "callback", "user_data", "raw_par", NULL};
+    int pes = FALSE;
+    int ts_pid = 0;
+    PyObject * callback = NULL;
+    PyObject * user_data = NULL;
+    PyObject * raw_par = NULL;
+
+    // reset state in case the module is already initialized
+    if (self->ctx) {
+        vbi_dvb_mux_delete(self->ctx);
+
+        if (self->mux_cb != NULL) {
+            Py_DECREF(self->mux_cb);
+            self->mux_cb = NULL;
+        }
+        if (self->mux_user_data != NULL) {
+            Py_DECREF(self->mux_user_data);
+            self->mux_user_data = NULL;
+        }
+        if (self->raw_params != NULL) {
+            Py_DECREF(self->raw_params);
+            self->raw_params = NULL;
+        }
+        self->ctx = NULL;
+    }
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$pIOOO!", kwlist,
+                                     &pes, &ts_pid, &callback, &user_data,
+                                     &ZvbiRawParamsTypeDef, &raw_par))
+    {
+        return -1;
+    }
+
+    if (((pes == FALSE) ^ (ts_pid == 0)) == 0) {  // error if both or neither are present
+        PyErr_SetString(PyExc_ValueError, "Exactly one of parameters pes or ts_pid have to be specified");
+        return -1;
+    }
+
+    if (pes) {
         if (callback != NULL) {
-                RETVAL->ctx = vbi_dvb_pes_mux_new(zvbi_xs_dvb_mux_handler, RETVAL);
-                if (RETVAL->ctx != NULL) {
-                        RETVAL->mux_cb = SvREFCNT_inc(callback);
-                        RETVAL->mux_user_data = SvREFCNT_inc(user_data);
-                }
-        } else {
-                RETVAL->ctx = vbi_dvb_pes_mux_new(NULL, NULL);
+            self->ctx = vbi_dvb_pes_mux_new(zvbi_xs_dvb_mux_handler, self);
         }
-        if (RETVAL->ctx == NULL) {
-                Safefree(RETVAL);
-                RETVAL = NULL;
+        else {
+            self->ctx = vbi_dvb_pes_mux_new(NULL, NULL);
         }
-        OUTPUT:
-        RETVAL
-
-VbiDvb_MuxObj *
-ts_new(pid, callback=NULL, user_data=NULL)
-        unsigned int    pid
-        CV *            callback
-        SV *            user_data
-        CODE:
-        Newxz(RETVAL, 1, VbiDvb_MuxObj);
+    }
+    else {  // ts
         if (callback != NULL) {
-                RETVAL->ctx = vbi_dvb_ts_mux_new(pid, zvbi_xs_dvb_mux_handler, RETVAL);
-                if (RETVAL->ctx != NULL) {
-                        RETVAL->mux_cb = SvREFCNT_inc(callback);
-                        RETVAL->mux_user_data = SvREFCNT_inc(user_data);
-                }
-        } else {
-                RETVAL->ctx = vbi_dvb_ts_mux_new(pid, NULL, NULL);
+            self->ctx = vbi_dvb_ts_mux_new(ts_pid, zvbi_xs_dvb_mux_handler, self);
         }
-        if (RETVAL->ctx == NULL) {
-                Safefree(RETVAL);
-                RETVAL = NULL;
+        else {
+            self->ctx = vbi_dvb_ts_mux_new(ts_pid, NULL, NULL);
         }
-        OUTPUT:
-        RETVAL
+    }
 
-void
-DESTROY(mx)
-        VbiDvb_MuxObj * mx
-        CODE:
-        vbi_dvb_mux_delete(mx->ctx);
-        Save_SvREFCNT_dec(mx->mux_cb);
-        Save_SvREFCNT_dec(mx->mux_user_data);
-        Safefree(mx);
+    int RETVAL = -1;
+    if (self->ctx != NULL) {
+        if (callback != NULL) {
+            self->mux_cb = callback;
+            Py_INCREF(callback);
+        }
+        if (user_data != NULL) {
+            self->mux_user_data = user_data;
+            Py_INCREF(user_data);
+        }
+        if (raw_par != NULL) {
+            self->raw_params = raw_par;
+            Py_INCREF(raw_par);
+        }
+        RETVAL = 0;
+    }
+    else {
+        PyErr_SetString(ZvbiDvbMuxError, "Initialization failed");
+    }
+    return RETVAL;
+}
 
-void
-vbi_dvb_mux_reset(mx)
-        VbiDvb_MuxObj * mx
-        CODE:
-        vbi_dvb_mux_reset(mx->ctx);
+static PyObject *
+ZvbiDvbMux_reset(ZvbiDvbMuxObj *self, PyObject *args)
+{
+    vbi_dvb_mux_reset(self->ctx);
 
-vbi_bool
-vbi_dvb_mux_cor(mx, sv_buf, buffer_left, sv_sliced, sliced_left, service_mask, pts, sv_raw=NULL, hv_raw_par=NULL)
-        VbiDvb_MuxObj *         mx
-        SV *                    sv_buf
-        unsigned int            &buffer_left
-        SV  *                   sv_sliced
-        unsigned int            &sliced_left
-        vbi_service_set         service_mask
-        int64_t                 pts
-        SV  *                   sv_raw
-        HV  *                   hv_raw_par
-        PREINIT:
-        uint8_t *               p_buf;
-        STRLEN                  buf_size;
-        const vbi_sliced *      p_sliced;
-        unsigned int            max_lines;
-        const uint8_t *         p_raw = NULL;
-        STRLEN                  raw_size;
-        vbi_raw_decoder         rd;
-        CODE:
-        if (sv_raw != NULL) {
-                Zero(&rd, 1, vbi_raw_decoder);
-                if (hv_raw_par != NULL) {
-                        zvbi_xs_hv_to_dec_params(hv_raw_par, &rd);
-                } else {
-                        croak("Sampling parameters must be present when a raw buffer is passed");
-                }
-                if (SvOK(sv_raw)) {
-                        p_raw = (void *) SvPV(sv_raw, raw_size);
-                        if (raw_size < (rd.count[0] + rd.count[1]) * rd.bytes_per_line) {
-                                croak("Input raw buffer is smaller than required for "
-                                      "VBI geometry (%d+%d lines with %d bytes)",
-                                      rd.count[0], rd.count[1], rd.bytes_per_line);
-                                p_raw = NULL;
+    if (self->sliced_buf_obj != NULL) {
+        Py_DECREF(self->sliced_buf_obj);
+        self->sliced_buf_obj = NULL;
+        self->p_sliced_buf = NULL;
+    }
+    if (self->raw_buf_obj != NULL) {
+        Py_DECREF(self->raw_buf_obj);
+        self->raw_buf_obj = NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+ZvbiDvbMux_feed(ZvbiDvbMuxObj *self, PyObject *args, PyObject *kwds)
+{
+    static char * kwlist[] = {"service_mask", "sliced_buf", "raw_buf", "pts", NULL};
+    unsigned service_mask = VBI_SLICED_TELETEXT_B |
+                            VBI_SLICED_VPS |
+                            VBI_SLICED_CAPTION_625 |
+                            VBI_SLICED_WSS_625;
+    PyObject * sliced_obj = NULL;
+    PyObject * raw_obj = NULL;
+    int64_t pts = 0LL;
+    PyObject * RETVAL = NULL;
+
+    if ((self->mux_cb != NULL) || (self->sliced_buf_obj == NULL)) {
+        if (PyArg_ParseTupleAndKeywords(args, kwds, "|I$O!O!d", kwlist,
+                                        &service_mask,
+                                        &ZvbiCaptureSlicedBufTypeDef, &sliced_obj,
+                                        &ZvbiCaptureRawBufTypeDef, &raw_obj,
+                                        &pts))
+        {
+            if (sliced_obj != NULL) {
+                vbi_capture_buffer * p_raw_buf = NULL;
+                vbi_raw_decoder * p_raw_par = NULL;
+
+                if (raw_obj != NULL) {
+                    if (self->raw_params != NULL) {
+                        p_raw_par = ZvbiRawParamsGetStruct(self->raw_params);
+                        p_raw_buf = ZvbiCaptureBuf_GetBuf(raw_obj);
+
+                        if (p_raw_buf->size < (p_raw_par->count[0] + p_raw_par->count[1]) * p_raw_par->bytes_per_line) {
+                            PyErr_Format(PyExc_TypeError,
+                                         "Input raw buffer is smaller than required for "
+                                         "VBI geometry (%d+%d lines with %d bytes per line)",
+                                         p_raw_par->count[0], p_raw_par->count[1], p_raw_par->bytes_per_line);
+                            p_raw_buf = NULL;
+                            p_raw_par = NULL;
                         }
-                } else {
-                        croak("Raw buffer is undefined or not a scalar");
+                    }
+                    else {
+                        PyErr_SetString(PyExc_TypeError, "Cannot feed raw data into DvbMux instance created without raw parameters");
+                    }
                 }
-        }
-        if (SvPOK(sv_buf)) {
-                p_buf = (void *) SvPV(sv_buf, buf_size);
-        } else {
-                p_buf = zvbi_xs_sv_buffer_prep(sv_buf, buffer_left);
-                buf_size = buffer_left;
-        }
-        if (buffer_left <= buf_size) {
-                p_sliced = zvbi_xs_sv_to_sliced(sv_sliced, &max_lines);
-                if ((p_sliced != NULL) && (sliced_left <= max_lines)) {
-                        p_buf += buf_size - buffer_left;
-                        p_sliced += max_lines - sliced_left;
+                if ((raw_obj == NULL) || (p_raw_buf != NULL)) {
+                    vbi_capture_buffer * p_sliced = ZvbiCaptureBuf_GetBuf(sliced_obj);
+                    unsigned sliced_lines = p_sliced->size / sizeof(vbi_sliced);
 
-                        RETVAL =
-                          vbi_dvb_mux_cor(mx->ctx,
-                                             &p_buf, &buffer_left,
-                                             &p_sliced, &sliced_left,
+                    if (self->mux_cb != NULL) {
+                        // Callback mode of operation: process all VBI data in one pass
+                        if (vbi_dvb_mux_feed(self->ctx,
+                                             p_sliced->data, sliced_lines,
                                              service_mask,
-                                             p_raw, ((p_raw != NULL) ? &rd : NULL),
-                                             pts);
-                } else if (p_sliced != NULL) {
-                        croak("Invalid sliced left count %d for buffer size (max. %d lines)", sliced_left, max_lines);
-                        RETVAL = FALSE;
-                } else {
-                        RETVAL = FALSE;
-                }
-        } else {
-                croak("Output buffer size %d is less than left count %d", (int)buf_size, (int)buffer_left);
-                RETVAL = FALSE;
-        }
-        OUTPUT:
-        buffer_left
-        sliced_left
-        RETVAL
-
-vbi_bool
-vbi_dvb_mux_feed(mx, sv_sliced, sliced_lines, service_mask, pts, sv_raw=NULL, hv_raw_par=NULL)
-        VbiDvb_MuxObj *         mx
-        SV  *                   sv_sliced
-        unsigned int            sliced_lines
-        vbi_service_set         service_mask
-        int64_t                 pts
-        SV  *                   sv_raw
-        HV  *                   hv_raw_par
-        PREINIT:
-        const vbi_sliced *      p_sliced;
-        unsigned int            max_lines;
-        const uint8_t *         p_raw = NULL;
-        STRLEN                  raw_size;
-        vbi_raw_decoder         rd;
-        CODE:
-        if (mx->mux_cb == NULL) {
-                croak("Use of the feed method is not possible in dvb_mux contexts without handler function");
-        }
-        if (sv_raw != NULL) {
-                Zero(&rd, 1, vbi_raw_decoder);
-                if (hv_raw_par != NULL) {
-                        zvbi_xs_hv_to_dec_params(hv_raw_par, &rd);
-                } else {
-                        croak("Sampling parameters must be present when a raw buffer is passed");
-                }
-                if (SvOK(sv_raw)) {
-                        p_raw = (void *) SvPV(sv_raw, raw_size);
-                        if (raw_size < (rd.count[0] + rd.count[1]) * rd.bytes_per_line) {
-                                croak("Input raw buffer is smaller than required for "
-                                      "VBI geometry (%d+%d lines with %d bytes)",
-                                      rd.count[0], rd.count[1], rd.bytes_per_line);
-                                p_raw = NULL;
+                                             (p_raw_buf ? p_raw_buf->data : NULL),
+                                             (p_raw_buf ? p_raw_par : NULL),
+                                             pts))
+                        {
+                            RETVAL = Py_None;
+                            Py_INCREF(Py_None);
                         }
-                } else {
-                        croak("Raw buffer is undefined or not a scalar");
-                }
-        }
-        p_sliced = zvbi_xs_sv_to_sliced(sv_sliced, &max_lines);
-        if ((p_sliced != NULL) && (sliced_lines <= max_lines)) {
-                RETVAL =
-                  vbi_dvb_mux_feed(mx->ctx,
-                                      p_sliced + max_lines - sliced_lines, sliced_lines,
-                                      service_mask,
-                                      p_raw, ((p_raw != NULL) ? &rd : NULL),
-                                      pts);
-        } else if (p_sliced != NULL) {
-                croak("Invalid sliced line count %d for buffer size (max. %d lines)", sliced_lines, max_lines);
-                RETVAL = FALSE;
-        } else {
-                RETVAL = FALSE;
-        }
-        OUTPUT:
-        RETVAL
-
-unsigned int
-vbi_dvb_mux_get_data_identifier(mx)
-        VbiDvb_MuxObj * mx
-        CODE:
-        RETVAL = vbi_dvb_mux_get_data_identifier(mx->ctx);
-        OUTPUT:
-        RETVAL
-
-vbi_bool
-vbi_dvb_mux_set_data_identifier(mx, data_identifier)
-        VbiDvb_MuxObj * mx
-        unsigned int    data_identifier
-        CODE:
-        RETVAL = vbi_dvb_mux_set_data_identifier(mx->ctx, data_identifier);
-        OUTPUT:
-        RETVAL
-
-unsigned int
-vbi_dvb_mux_get_min_pes_packet_size(mx)
-        VbiDvb_MuxObj * mx
-        CODE:
-        RETVAL = vbi_dvb_mux_get_min_pes_packet_size(mx->ctx);
-        OUTPUT:
-        RETVAL
-
-unsigned int
-vbi_dvb_mux_get_max_pes_packet_size(mx)
-        VbiDvb_MuxObj * mx
-        CODE:
-        RETVAL = vbi_dvb_mux_get_max_pes_packet_size(mx->ctx);
-        OUTPUT:
-        RETVAL
-
-vbi_bool
-vbi_dvb_mux_set_pes_packet_size(mx, min_size, max_size)
-        VbiDvb_MuxObj * mx
-        unsigned int    min_size
-        unsigned int    max_size
-        CODE:
-        RETVAL = vbi_dvb_mux_set_pes_packet_size(mx->ctx, min_size, max_size);
-        OUTPUT:
-        RETVAL
-
-//MODULE = Video::ZVBI  PACKAGE = Video::ZVBI
-
-vbi_bool
-dvb_multiplex_sliced(sv_buf, buffer_left, sv_sliced, sliced_left, service_mask, data_identifier, stuffing)
-        SV *                    sv_buf
-        unsigned int            &buffer_left
-        SV *                    sv_sliced
-        unsigned int            &sliced_left
-        vbi_service_set         service_mask
-        unsigned int            data_identifier
-        vbi_bool                stuffing
-        PREINIT:
-        uint8_t *               p_buf;
-        STRLEN                  buf_size;
-        const vbi_sliced *      p_sliced;
-        unsigned int            max_lines;
-        CODE:
-        if (SvPOK(sv_buf)) {
-                p_buf = (void *) SvPV(sv_buf, buf_size);
-        } else {
-                p_buf = zvbi_xs_sv_buffer_prep(sv_buf, buffer_left);
-                buf_size = buffer_left;
-        }
-        p_buf = (void *) SvPV(sv_buf, buf_size);
-        if (buffer_left <= buf_size) {
-                p_sliced = zvbi_xs_sv_to_sliced(sv_sliced, &max_lines);
-                if ((p_sliced != NULL) && (sliced_left <= max_lines)) {
-                        p_buf += buf_size - buffer_left;
-                        p_sliced += max_lines - sliced_left;
-
-                        RETVAL =
-                          vbi_dvb_multiplex_sliced ( &p_buf, &buffer_left,
-                                                        &p_sliced, &sliced_left,
-                                                        service_mask, data_identifier,
-                                                        stuffing );
-                } else if (p_sliced != NULL) {
-                        croak("Invalid sliced left count %d for buffer size (max. %d lines)", sliced_left, max_lines);
-                        RETVAL = FALSE;
-                } else {
-                        RETVAL = FALSE;
-                }
-        } else {
-                croak("Output buffer size %d is less than left count %d", (int)buf_size, (int)buffer_left);
-                RETVAL = FALSE;
-        }
-        OUTPUT:
-        buffer_left
-        sliced_left
-        RETVAL
-
-vbi_bool
-dvb_multiplex_raw(sv_buf, buffer_left, sv_raw, raw_left, data_identifier, videostd_set, line, first_pixel_position, n_pixels_total, stuffing)
-        SV *                    sv_buf
-        unsigned int            &buffer_left
-        SV *                    sv_raw
-        unsigned int            &raw_left
-        unsigned int            data_identifier
-        vbi_videostd_set        videostd_set
-        unsigned int            line
-        unsigned int            first_pixel_position
-        unsigned int            n_pixels_total
-        vbi_bool                stuffing
-        PREINIT:
-        uint8_t *               p_buf;
-        STRLEN                  buf_size;
-        const uint8_t *         p_raw;
-        STRLEN                  raw_size;
-        CODE:
-        if (SvPOK(sv_buf)) {
-                p_buf = (void *) SvPV(sv_buf, buf_size);
-        } else {
-                p_buf = zvbi_xs_sv_buffer_prep(sv_buf, buffer_left);
-                buf_size = buffer_left;
-        }
-        p_buf = (void *) SvPV(sv_buf, buf_size);
-        if (buffer_left <= buf_size) {
-                if (SvOK(sv_raw)) {
-                        p_raw = (void *) SvPV(sv_raw, raw_size);
-                        if (raw_left <= raw_size) {
-                                p_buf += buf_size - buffer_left;
-                                p_raw += raw_size - raw_left;
-
-                                RETVAL =
-                                  vbi_dvb_multiplex_raw ( &p_buf, &buffer_left,
-                                                             &p_raw, &raw_left,
-                                                             data_identifier, videostd_set,
-                                                             line, first_pixel_position,
-                                                             n_pixels_total, stuffing);
-                        } else {
-                                croak("Output buffer size %d is less than left count %d", (int)buf_size, buffer_left);
-                                RETVAL = FALSE;
+                        else {
+                            PyErr_SetString(ZvbiDvbMuxError, "multiplexing failure");
                         }
-                } else {
-                        croak("Raw input buffer is undefined or not a scalar");
-                        RETVAL = FALSE;
-                }
-        } else {
-                croak("Output buffer size %d is less than left count %d", (int)buf_size, (int)buffer_left);
-                RETVAL = FALSE;
-        }
-        OUTPUT:
-        buffer_left
-        raw_left
-        RETVAL
+                    }
+                    else {
+                        // Iteration mode: only store reference to the buffer
+                        // data will be processed by following iteration
+                        Py_INCREF(sliced_obj);
+                        self->sliced_buf_obj = sliced_obj;
+                        self->p_sliced_buf = p_sliced->data;
+                        self->sliced_left = sliced_lines;
+                        //self->buffer_obj allocated on demand during iteration
 
-#endif // 0
+                        if (p_raw_buf != NULL) {
+                            Py_INCREF(raw_obj);
+                            self->raw_buf_obj = raw_obj;
+                        }
+                        else {
+                            self->raw_buf_obj = NULL;
+                        }
+                        self->feed_service_mask = service_mask;
+                        self->feed_pts = pts;
+
+                        RETVAL = Py_None;
+                        Py_INCREF(Py_None);
+                    }
+                }
+            }
+            else {
+                PyErr_SetString(PyExc_ValueError, "Missing mandatory parameter 'sliced_buf'");
+            }
+        }
+    }
+    else {
+        PyErr_SetString(PyExc_ValueError, "Previous feed buffer not drained via iteration yet");
+    }
+    return RETVAL;
+}
+
+/*
+ * Implementation of the standard "__iter__" function
+ */
+static ZvbiDvbMuxObj *
+ZvbiDvbMux_Iter(ZvbiDvbMuxObj *self)
+{
+    ZvbiDvbMuxObj * RETVAL = NULL;
+
+    if ((self->mux_cb == NULL) && (self->sliced_buf_obj != NULL)) {
+        // Note corresponding DECREF is done by caller after end of iteration
+        Py_INCREF(self);
+        RETVAL = self;
+    }
+    else {
+        if (self->mux_cb != NULL) {
+            PyErr_SetString(PyExc_TypeError, "DvbMux instance is configured for use with callback instead of iteration");
+        }
+        else {
+            PyErr_SetString(PyExc_IndexError, "Feed is empty");
+        }
+    }
+    return RETVAL;
+}
+
+/*
+ * Implementation of the standard "__next__" function
+ */
+static PyObject *
+ZvbiDvbMux_IterNext(ZvbiDvbMuxObj *self)
+{
+    PyObject * RETVAL = NULL;
+    vbi_bool done = TRUE;
+
+    if (self->sliced_buf_obj != NULL) {
+        if (self->sliced_left > 0) {
+            vbi_capture_buffer * p_raw_buf = (self->raw_buf_obj
+                                    ? ZvbiCaptureBuf_GetBuf(self->raw_buf_obj) : NULL);
+            if (self->buffer_obj == NULL) {
+                self->buffer_obj = PyBytes_FromStringAndSize(NULL, OUTPUT_BUF_SIZE);
+            }
+            uint8_t * p_buffer = (uint8_t*) PyBytes_AS_STRING(self->buffer_obj);
+            unsigned buffer_left = OUTPUT_BUF_SIZE;
+
+            if (vbi_dvb_mux_cor(self->ctx,
+                                &p_buffer, &buffer_left,
+                                &self->p_sliced_buf, &self->sliced_left,
+                                self->feed_service_mask,
+                                (p_raw_buf ? p_raw_buf->data : NULL),
+                                (p_raw_buf ? ZvbiRawParamsGetStruct(self->raw_params) : NULL),
+                                self->feed_pts))
+            {
+                if ((buffer_left == 0) && (self->sliced_left > 0)) {
+                    done = FALSE;
+                }
+
+                if (buffer_left != OUTPUT_BUF_SIZE) {
+                    _PyBytes_Resize(&self->buffer_obj, (Py_ssize_t)(OUTPUT_BUF_SIZE - buffer_left));
+                    RETVAL = self->buffer_obj;
+                    self->buffer_obj = NULL;  // now owned by RETVAL object
+                }
+            }
+            else {
+                vbi_capture_buffer * p_sliced = ZvbiCaptureBuf_GetBuf(self->sliced_buf_obj);
+                PyErr_Format(ZvbiDvbMuxError, "Encoding failure at sliced line index %d",
+                                              self->p_sliced_buf - (vbi_sliced*) p_sliced->data);
+            }
+        }
+        if (done) {
+            Py_DECREF(self->sliced_buf_obj);
+            self->sliced_buf_obj = NULL;
+            self->p_sliced_buf = NULL;
+
+            if (self->raw_buf_obj != NULL) {
+                Py_DECREF(self->raw_buf_obj);
+                self->raw_buf_obj = NULL;
+            }
+            // keep possibly still allocated buffer_obj for next iteration
+        }
+    }
+    if (RETVAL == NULL) {
+        PyErr_SetNone(PyExc_StopIteration);
+    }
+    return RETVAL;
+}
+
+
+static PyObject *
+ZvbiDvbMux_get_data_identifier(ZvbiDvbMuxObj *self, PyObject *args)
+{
+    unsigned id = vbi_dvb_mux_get_data_identifier(self->ctx);
+    return PyLong_FromLong(id);
+}
+
+static PyObject *
+ZvbiDvbMux_set_data_identifier(ZvbiDvbMuxObj *self, PyObject *args)
+{
+    int id = 0;
+    PyObject * RETVAL = NULL;
+
+    if (PyArg_ParseTuple(args, "I", &id)) {
+        if (vbi_dvb_mux_set_data_identifier(self->ctx, id)) {
+            RETVAL = Py_None;
+            Py_INCREF(Py_None);
+        }
+        else {
+            PyErr_SetString(PyExc_TypeError, "invalid parameter value");
+        }
+    }
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiDvbMux_get_min_pes_packet_size(ZvbiDvbMuxObj *self, PyObject *args)
+{
+    unsigned sz = vbi_dvb_mux_get_min_pes_packet_size(self->ctx);
+    return PyLong_FromLong(sz);
+}
+
+static PyObject *
+ZvbiDvbMux_get_max_pes_packet_size(ZvbiDvbMuxObj *self, PyObject *args)
+{
+    unsigned sz = vbi_dvb_mux_get_max_pes_packet_size(self->ctx);
+    return PyLong_FromLong(sz);
+}
+
+static PyObject *
+ZvbiDvbMux_set_pes_packet_size(ZvbiDvbMuxObj *self, PyObject *args)
+{
+    int min_size = 0;
+    int max_size = 0;
+    PyObject * RETVAL = NULL;
+
+    if (PyArg_ParseTuple(args, "II", &min_size, &max_size)) {
+        if (vbi_dvb_mux_set_pes_packet_size(self->ctx, min_size, max_size)) {
+            RETVAL = Py_None;
+            Py_INCREF(Py_None);
+        }
+        else {
+            PyErr_SetString(ZvbiDvbMuxError, "failed to set packet size (out of memory)");
+        }
+    }
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiDvbMux_multiplex_sliced(ZvbiDvbMuxObj *self, PyObject *args)
+{
+    PyObject * pkg_buf_obj;
+    unsigned   pkg_left;
+    PyObject * sliced_obj;
+    unsigned   sliced_left;
+    unsigned   service_mask = VBI_SLICED_TELETEXT_B |
+                              VBI_SLICED_VPS |
+                              VBI_SLICED_CAPTION_625 |
+                              VBI_SLICED_WSS_625;
+    unsigned   data_identifier = 0x10;
+    int        stuffing = FALSE;
+    PyObject * RETVAL = NULL;
+
+    if (PyArg_ParseTuple(args, "YIO!I|IIp",
+                               &pkg_buf_obj, &pkg_left,
+                               &ZvbiCaptureSlicedBufTypeDef, &sliced_obj, &sliced_left,
+                               &service_mask, &data_identifier, &stuffing)) {
+        if (PyByteArray_Size(pkg_buf_obj) >= pkg_left) {
+            vbi_capture_buffer * p_sliced_buf = ZvbiCaptureBuf_GetBuf(sliced_obj);
+            unsigned sliced_cnt = p_sliced_buf->size / sizeof(vbi_sliced);
+            const vbi_sliced * p_sliced = p_sliced_buf->data;
+
+            if (sliced_left <= sliced_cnt) {
+                uint8_t * p_pkg = (uint8_t*) PyByteArray_AsString(pkg_buf_obj);
+
+                p_pkg += PyByteArray_Size(pkg_buf_obj) - pkg_left;
+                p_sliced += sliced_cnt - sliced_left;
+
+                if (vbi_dvb_multiplex_sliced(&p_pkg, &pkg_left,
+                                             &p_sliced, &sliced_left,
+                                             service_mask, data_identifier, stuffing))
+                {
+                    RETVAL = PyTuple_New(2);
+                    if (RETVAL != NULL) {
+                        PyTuple_SetItem(RETVAL, 0, PyLong_FromLong(pkg_left));
+                        PyTuple_SetItem(RETVAL, 1, PyLong_FromLong(sliced_left));
+                    }
+                }
+                else {
+                    // FIXME return pkg_left, sliced_left
+                    PyErr_SetString(ZvbiDvbMuxError, "encoding failed");
+                }
+            }
+            else {
+                PyErr_SetString(PyExc_ValueError, "sliced buffer has fewer lines than value of sliced_left");
+            }
+        }
+        else {
+            PyErr_SetString(PyExc_ValueError, "packet buffer is smaller than value of packet_left");
+        }
+    }
+    return RETVAL;
+}
+
+
+static PyObject *
+ZvbiDvbMux_multiplex_raw(ZvbiDvbMuxObj *self, PyObject *args)
+{
+    PyObject * pkg_buf_obj;
+    unsigned   pkg_left;
+    PyObject * raw_obj;
+    unsigned   raw_left;
+    unsigned   data_identifier;
+    unsigned   videostd_set;
+    unsigned   itu_line;
+    unsigned   first_pixel_position;
+    unsigned   n_pixels_total;
+    int        stuffing = FALSE;
+    PyObject * RETVAL = NULL;
+
+    if (PyArg_ParseTuple(args, "YIO!IIIIII|p",
+                               &pkg_buf_obj, &pkg_left,
+                               &ZvbiCaptureRawBufTypeDef, &raw_obj, &raw_left,
+                               &data_identifier, &videostd_set, &itu_line,
+                               &first_pixel_position, &n_pixels_total, &stuffing)) {
+        if (PyByteArray_Size(pkg_buf_obj) >= pkg_left) {
+            vbi_capture_buffer * p_raw_buf = ZvbiCaptureBuf_GetBuf(raw_obj);
+            if (raw_left <= p_raw_buf->size) {
+                uint8_t * p_pkg = (uint8_t*) PyByteArray_AsString(pkg_buf_obj);
+
+                p_pkg += PyByteArray_Size(pkg_buf_obj) - pkg_left;
+                const uint8_t * p_raw = (uint8_t*)p_raw_buf->data + p_raw_buf->size - raw_left;
+
+                if (vbi_dvb_multiplex_raw(&p_pkg, &pkg_left,
+                                          &p_raw, &raw_left,
+                                          data_identifier, videostd_set,
+                                          itu_line, first_pixel_position,
+                                          n_pixels_total, stuffing))
+                {
+                    RETVAL = PyTuple_New(2);
+                    if (RETVAL != NULL) {
+                        PyTuple_SetItem(RETVAL, 0, PyLong_FromLong(pkg_left));
+                        PyTuple_SetItem(RETVAL, 1, PyLong_FromLong(raw_left));
+                    }
+                }
+                else {
+                    PyErr_SetString(ZvbiDvbMuxError, "encoding failed");
+                }
+            }
+            else {
+                PyErr_SetString(PyExc_ValueError, "raw buffer has fewer lines than value of raw_left");
+            }
+        }
+        else {
+            PyErr_SetString(PyExc_ValueError, "packet buffer is smaller than value of packet_left");
+        }
+    }
+    return RETVAL;
+}
+
+// ---------------------------------------------------------------------------
+
+static PyMethodDef ZvbiDvbMux_MethodsDef[] =
+{
+    {"reset",                   (PyCFunction) ZvbiDvbMux_reset,                   METH_NOARGS, NULL },
+    {"feed",                    (PyCFunction) ZvbiDvbMux_feed,                    METH_VARARGS | METH_KEYWORDS, NULL },
+    {"get_data_identifier",     (PyCFunction) ZvbiDvbMux_get_data_identifier,     METH_NOARGS, NULL },
+    {"set_data_identifier",     (PyCFunction) ZvbiDvbMux_set_data_identifier,     METH_VARARGS, NULL },
+    {"get_min_pes_packet_size", (PyCFunction) ZvbiDvbMux_get_min_pes_packet_size, METH_NOARGS, NULL },
+    {"get_max_pes_packet_size", (PyCFunction) ZvbiDvbMux_get_max_pes_packet_size, METH_NOARGS, NULL },
+    {"set_pes_packet_size",     (PyCFunction) ZvbiDvbMux_set_pes_packet_size,     METH_VARARGS, NULL },
+
+    // static methods
+    {"multiplex_sliced",        (PyCFunction) ZvbiDvbMux_multiplex_sliced,        METH_VARARGS | METH_STATIC, NULL },
+    {"multiplex_raw",           (PyCFunction) ZvbiDvbMux_multiplex_raw,           METH_VARARGS | METH_STATIC, NULL },
+
+    {NULL}  /* Sentinel */
+};
+
+PyTypeObject ZvbiDvbMuxTypeDef =
+{
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "Zvbi.DvbMux",
+    .tp_doc = PyDoc_STR("Class for generating a DVB PES or TS stream from VBI sliced or raw data"),
+    .tp_basicsize = sizeof(ZvbiDvbMuxObj),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = ZvbiDvbMux_new,
+    .tp_init = (initproc) ZvbiDvbMux_init,
+    .tp_dealloc = (destructor) ZvbiDvbMux_dealloc,
+    //.tp_repr = (PyObject * (*)(PyObject*)) ZvbiDvbMux_Repr,
+    .tp_methods = ZvbiDvbMux_MethodsDef,
+    //.tp_members = ZvbiDvbMux_Members,
+    .tp_iter = (getiterfunc) ZvbiDvbMux_Iter,
+    .tp_iternext = (iternextfunc) ZvbiDvbMux_IterNext,
+};
+
+int PyInit_DvbMux(PyObject * module, PyObject * error_base)
+{
+    if (PyType_Ready(&ZvbiDvbMuxTypeDef) < 0) {
+        return -1;
+    }
+
+    // create exception class
+    ZvbiDvbMuxError = PyErr_NewException("Zvbi.DvbMuxError", error_base, NULL);
+    Py_XINCREF(ZvbiDvbMuxError);
+    if (PyModule_AddObject(module, "DvbMuxError", ZvbiDvbMuxError) < 0) {
+        Py_XDECREF(ZvbiDvbMuxError);
+        Py_CLEAR(ZvbiDvbMuxError);
+        Py_DECREF(module);
+        return -1;
+    }
+
+    // create class type object
+    Py_INCREF(&ZvbiDvbMuxTypeDef);
+    if (PyModule_AddObject(module, "DvbMux", (PyObject *) &ZvbiDvbMuxTypeDef) < 0) {
+        Py_DECREF(&ZvbiDvbMuxTypeDef);
+        Py_XDECREF(ZvbiDvbMuxError);
+        Py_CLEAR(ZvbiDvbMuxError);
+        return -1;
+    }
+
+    return 0;
+}

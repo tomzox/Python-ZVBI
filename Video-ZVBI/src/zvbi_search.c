@@ -158,7 +158,7 @@ ZvbiSearch_init(ZvbiSearchObj *self, PyObject *args, PyObject *kwds)
             uint16_t * ucs2 = (uint16_t*) PyMem_RawMalloc((ucs4_len + 1) * 2);
             uint16_t * p = ucs2;
 
-            /* convert pattern string from Perl's utf8 into UCS-2 */
+            // convert pattern string from UCS-4 into UCS-2
             for (Py_ssize_t idx = 0; idx < ucs4_len; ++idx) {
                 Py_UCS4 c = PyUnicode_READ(ucs4_kind, ucs4_buf, idx);
                 if (c < 0x10000) {

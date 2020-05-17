@@ -725,17 +725,17 @@ def decode_vbi(sliced, n_lines, sample_time, stream_time):
             pass
 
 
-def dvb_feed_cb(sliced_buf, n_lines, pts, user_data):
+def dvb_feed_cb(sliced_buf, n_lines, pts):
     if n_lines > 0:
         # pull all data lines out of the packed slicer buffer
-        # since we want to process them by Perl code
+        # since we want to process them by Python code
         # (something we'd normally like to avoid, as it's slow)
         # (see export.pl for an efficient use case)
-        sliced = (x for x in sliced_buf)
+        sliced = list(sliced_buf)
 
         decode_vbi(sliced, n_lines,
-                0,    # sample_time
-                pts)  # stream_time
+                   0,    # sample_time
+                   pts)  # stream_time
 
     # return TRUE in case we're invoked as callback via feed()
     return True
@@ -744,14 +744,12 @@ def dvb_feed_cb(sliced_buf, n_lines, pts, user_data):
 def pes_mainloop():
     while True:
         buf = infile.read(2048)
-        bytes_left = len(buf)
-        if bytes_left == 0:
+        if len(buf) == 0:
             break
 
-        while (bytes_left > 0):
-            n_lines = dx.cor(sliced, 64, pts, buf, bytes_left)
-            if (n_lines > 0):
-                dvb_feed_cb(sliced, n_lines, pts)
+        dvb.feed(buf)
+        for sliced_buf in dvb:
+            dvb_feed_cb(sliced_buf, len(sliced_buf), sliced_buf.timestamp)
 
     print("\rEnd of stream", file=sys.stderr)
 
@@ -842,6 +840,9 @@ def main_func():
     if opt.decode_xds:
         xds = Zvbi.XdsDemux(xds_cb)
 
+    if opt.verbose:
+        Zvbi.set_log_on_stderr(-1)
+
     outfile = open(sys.stdout.fileno(), "wb")
     infile = open(sys.stdin.fileno(), "rb")
 
@@ -850,8 +851,11 @@ def main_func():
     c=1
 
     if (0 == c or opt.source_is_pes):
-        #dvb = Zvbi.DvbDemux(pes=True, dvb_feed_cb)  #obsolete
-        dvb = Zvbi.DvbDemux(pes=False)
+        #dvb = Zvbi.DvbDemux(dvb_feed_cb)
+        dvb = Zvbi.DvbDemux()
+        if opt.verbose:
+            dvb.set_log_fn
+            dvb.set_log_fn(Zvbi.VBI_LOG_DEBUG, lambda l,c,m: print("DEMUX LOG", l, c, m, file=sys.stderr))
         pes_mainloop()
     else:
 #if 2 == VBI_VERSION_MINOR # XXX port me
@@ -859,10 +863,6 @@ def main_func():
 #endif
         old_mainloop()
 
-
-#def vlog(level,context,message,user_data):
-#   print("LOG ", level,context,message,user_data)
-#Zvbi.set_log_fn(Zvbi.VBI_LOG_DEBUG, vlog, "\n")
 
 try:
     opt = ParseCmdOptions()

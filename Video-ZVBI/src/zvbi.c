@@ -75,6 +75,7 @@ zvbi_xs_log_callback( vbi_log_mask           level,
             ? PyObject_CallFunction(cb_obj, "IssO", level, context, message, user_data)
             : PyObject_CallFunction(cb_obj, "Iss", level, context, message));
 
+        // discard result
         if (cb_rslt != NULL) {
             Py_DECREF(cb_rslt);
         }
@@ -597,15 +598,17 @@ PyInit_Zvbi(void)
     }
 
     if ((PyInit_Capture(module, ZvbiError) < 0) ||
+        (PyInit_CaptureBuf(module, ZvbiError) < 0) ||
         (PyInit_Proxy(module, ZvbiError) < 0) ||
         (PyInit_RawDec(module, ZvbiError) < 0) ||
         (PyInit_RawParams(module, ZvbiError) < 0) ||
-        (PyInit_CaptureBuf(module, ZvbiError) < 0) ||
         (PyInit_ServiceDec(module, ZvbiError) < 0) ||
-        (PyInit_Page(module, ZvbiError) < 0) ||
         (PyInit_EventTypes(module, ZvbiError) < 0) ||
+        (PyInit_Page(module, ZvbiError) < 0) ||
+        (PyInit_Search(module, ZvbiError) < 0) ||
         (PyInit_Export(module, ZvbiError) < 0) ||
-        (PyInit_Search(module, ZvbiError) < 0))
+        (PyInit_DvbMux(module, ZvbiError) < 0) ||
+        (PyInit_DvbDemux(module, ZvbiError) < 0))
     {
         Py_DECREF(module);
         return NULL;

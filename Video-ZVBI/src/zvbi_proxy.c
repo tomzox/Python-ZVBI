@@ -128,16 +128,17 @@ ZvbiProxy_init(ZvbiProxyObj *self, PyObject *args, PyObject *kwds)
 
 
 // This function is currently NOT supported because we must not create a 2nd
-// reference to the C object (i.e. on Perl level there are two separate objects
-// but both share the same object on C level; so we'd have to implement a
-// secondary reference counter on C level.) It's not worth the effort anyway
-// since the application must have received the capture reference.
+// reference to the C object. It's not worth the effort anyway since the
+// application has already received the capture reference via
+// vbi_capture_proxy_new()
 //
 
 #if 0  /* unsupported */
-VbiCaptureObj *
-vbi_proxy_client_get_capture_if(vpc)
-        VbiProxyObj * vpc
+ZvbiCaptureObj *
+vbi_proxy_client_get_capture_if(ZvbiProxyObj * vpc)
+{
+    vbi_capture * cap = vbi_proxy_client_get_capture_if(self->ctx);
+}
 #endif
 
 static PyObject *
