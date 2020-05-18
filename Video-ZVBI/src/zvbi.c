@@ -607,6 +607,9 @@ PyInit_Zvbi(void)
         (PyInit_Page(module, ZvbiError) < 0) ||
         (PyInit_Search(module, ZvbiError) < 0) ||
         (PyInit_Export(module, ZvbiError) < 0) ||
+        (PyInit_IdlDemux(module, ZvbiError) < 0) ||
+        (PyInit_PfcDemux(module, ZvbiError) < 0) ||
+        (PyInit_XdsDemux(module, ZvbiError) < 0) ||
         (PyInit_DvbMux(module, ZvbiError) < 0) ||
         (PyInit_DvbDemux(module, ZvbiError) < 0))
     {

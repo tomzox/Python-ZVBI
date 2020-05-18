@@ -163,6 +163,7 @@ def vbi_rgba(v):
 def pg_display_text():
     try:
         pg = vtdec.fetch_vt_page(pg_sched)
+
         (rows, columns) = pg.get_page_size()
         pal = pg.get_page_color_map()
         text = pg.get_page_text()
@@ -223,7 +224,8 @@ def pg_link(x, y):
                 fh = tk.call("font", "metrics", font, "-linespace")
                 fw = font.measure("0")
 
-            link = pg.resolve_link(math.floor(x / fw + .5), math.floor(y / fh + .5))
+            print("link X/X %d,%d" % (x//fw, y//fh))
+            link = pg.resolve_link(x // fw, y // fh)
             if link.type == Zvbi.VBI_LINK_PAGE:
                 pg_sched = link.pgno
                 dec_entry.set("%03X" % pg_sched)
@@ -255,6 +257,7 @@ def pg_plus_minus(off):
 #
 def pg_change():
     global redraw
+    global pg_sched
     try:
         v = int(dec_entry.get())
         pg_sched = Zvbi.dec2bcd(v)
@@ -299,7 +302,7 @@ def gui_init():
     wid_f1 = Frame(tk)
     wid_f1_sp = Spinbox(wid_f1, from_=100, to=899, width=5,
                         textvariable=dec_entry, command=pg_change)
-    wid_f1_sp.bind('<Return>', lambda e: pg_change)
+    wid_f1_sp.bind('<Return>', lambda e: pg_change())
     wid_f1_sp.pack(side=LEFT, anchor=W)
     wid_f1_lab = Label(wid_f1, textvariable=pg_lab)
     wid_f1_lab.pack(side=LEFT)

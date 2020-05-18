@@ -128,8 +128,9 @@ def _vbi_pfc_block_dump(pgno, stream, app_id, block, binary):
           (pgno, stream, app_id, length(block)))
 
     if binary:
-        #io.write(block, length block)
-        pass
+        # cannot mix binary write with text print within same stream in Python
+        #sys.stdout.write(block)
+        print(block)
     else:
         block = Zvbi.unpar_str(block, '.')
         block = re.sub(r'[\x00-\x1F\x7F]', '.', block.decode('ISO-8859-1'))
@@ -249,9 +250,9 @@ def caption_command(line, c1, c2):
     print("unknown")
 
 
-def xds_cb(xds_class, xds_subclass, buffer, user_data):
+def xds_cb(xds_class, xds_subclass, buf, user_data=None):
     #_vbi_xds_packet_dump(xp, stdout)
-    print("XDS packet callback: class:xds_class,xds_subclass")
+    print("XDS packet:", xds_class, xds_subclass, buf)
 
     return True  # no errors
 
@@ -422,12 +423,12 @@ def dump_bytes(buffer, n_bytes):
 #
 #endif # 3 == VBI_VERSION_MINOR
 
-def page_function_clear_cb(pgno, stream, app_id, block, user_data):
+def page_function_clear_cb(pgno, stream, app_id, block, user_data=None):
     _vbi_pfc_block_dump(pgno, stream, app_id, block, opt.dump_bin)
     return True
 
 
-def  idl_format_a_cb(buffer, flags, user_data):
+def  idl_format_a_cb(buffer, flags, user_data=None):
     if not opt.dump_bin:
         print("IDL-A%s%s " %
                 (" <data lost>" if (flags & Zvbi.VBI_IDL_DATA_LOST) else ""),
@@ -769,39 +770,45 @@ def old_mainloop():
     print("\rEnd of stream", file=sys.stderr)
 
 
-#short_options [] = "12abcd:ehil:np:rs:tvwxPTV"
+def ttx_pgno(val_str):
+    val = int(val_str, 16)
+    if (val < 0x100) or (val > 0x8FF):
+        raise ValueError("Teletext page not in range 100-8FF")
+    return val
+
 
 def ParseCmdOptions():
+    global opt
     desc = "ZVBI decoding examples\n" + \
            "Copyright (C) 2004, 2006 Michael H. Schimek\n" + \
            "This program is licensed under GPL 2 or later. NO WARRANTIES."
     parser = argparse.ArgumentParser(description=desc)
     # Input options:
-    parser.add_argument("-P", "--pes", action='store_true', default=False, dest="source_is_pes", help="Source is a DVB PES stream [auto-detected]") # ATSC/DVB
+    parser.add_argument("--pes", action='store_true', default=False, dest="source_is_pes", help="Source is a DVB PES stream [auto-detected]") # ATSC/DVB
     # Decoding options:
-    parser.add_argument("-1", "--8301", action='store_true', default=False, dest="decode_8301", help="Teletext packet 8/30 format 1 (local time)")
-    parser.add_argument("-2", "--8302", action='store_true', default=False, dest="decode_8302", help="Teletext packet 8/30 format 2 (PDC)")
-    parser.add_argument("-a", "--all", action='store_true', default=False, dest="all", help="Enable ttx,8301,8302,cc,idl,vps,wssxds,pfc")
-    parser.add_argument("-c", "--cc", action='store_true', default=False, dest="decode_caption", help="Closed Caption")
-    parser.add_argument("-i", "--idl", action='store_true', default=False, dest="decode_idl", help="Any Teletext IDL packets (M/30, M/31)")
-    parser.add_argument("-l", "--idl-ch", type=int, default=0, dest="idl_channel", help="Decode Teletext IDL format A data from channel N")
-    parser.add_argument("-d", "--idl-addr", type=int, default=0, dest="idl_address", help="Decode Teletext IDL format A data from address NNN")
-    parser.add_argument("-p", "--pfc-pgno", type=int, default=0, dest="pfc_pgno", help="Decode Teletext Page Function Clear data from page NNN (e.g. 1DF)")
-    parser.add_argument("-s", "--pfc-stream", type=int, default=0, dest="pfc_stream", help="Decode Teletext Page Function Clear data from stream NN")
-    parser.add_argument("-v", "--vps", action='store_true', default=False, dest="decode_vps", help="Decode VPS data unrelated to PDC")
-    parser.add_argument("-r", "--vps-other", action='store_true', default=False, dest="decode_vps_other", help="Decode VPS data unrelated to PDC")
-    parser.add_argument("-t", "--ttx", action='store_true', default=False, dest="decode_ttx", help="Decode any Teletext packet")
-    parser.add_argument("-w", "--wss", action='store_true', default=False, dest="decode_wss", help="Wide Screen Signalling")
-    parser.add_argument("-x", "--xds", action='store_true', default=False, dest="decode_xds", help="Decode eXtended Data Service (NTSC line 284)")
+    parser.add_argument("--8301", action='store_true', default=False, dest="decode_8301", help="Teletext packet 8/30 format 1 (local time)")
+    parser.add_argument("--8302", action='store_true', default=False, dest="decode_8302", help="Teletext packet 8/30 format 2 (PDC)")
+    parser.add_argument("--all", action='store_true', default=False, dest="all", help="Enable ttx,8301,8302,cc,idl,vps,wssxds,pfc")
+    parser.add_argument("--cc", action='store_true', default=False, dest="decode_caption", help="Closed Caption")
+    parser.add_argument("--idl", action='store_true', default=False, dest="decode_idl", help="Any Teletext IDL packets (M/30, M/31)")
+    parser.add_argument("--idl-ch", type=int, default=0, dest="idl_channel", help="Decode Teletext IDL format A data from channel N")
+    parser.add_argument("--idl-addr", type=int, default=0, dest="idl_address", help="Decode Teletext IDL format A data from address NNN")
+    parser.add_argument("--pfc-pgno", type=ttx_pgno, default=0, dest="pfc_pgno", help="Decode Teletext Page Function Clear data from page NNN (e.g. 1DF)")
+    parser.add_argument("--pfc-stream", type=int, default=0, dest="pfc_stream", help="Decode Teletext Page Function Clear data from stream NN")
+    parser.add_argument("--vps", action='store_true', default=False, dest="decode_vps", help="Decode VPS data unrelated to PDC")
+    parser.add_argument("--vps-other", action='store_true', default=False, dest="decode_vps_other", help="Decode VPS data unrelated to PDC")
+    parser.add_argument("--ttx", action='store_true', default=False, dest="decode_ttx", help="Decode any Teletext packet")
+    parser.add_argument("--wss", action='store_true', default=False, dest="decode_wss", help="Wide Screen Signalling")
+    parser.add_argument("--xds", action='store_true', default=False, dest="decode_xds", help="Decode eXtended Data Service (NTSC line 284)")
     # Modifying options:
-    parser.add_argument("-e", "--hex", action='store_true', default=False, dest="dump_hex", help="With -t dump packets in hex and ASCII, otherwise only ASCII")
-    parser.add_argument("-n", "--network", action='store_true', default=False, dest="dump_network", help="With -1, -2, -v decode CNI and print available information about the network")
-    parser.add_argument("-b", "--bin", action='store_true', default=False, dest="dump_bin", help="With -t, -p, -v dump data in binary format instead of ASCII")
-    parser.add_argument("-T", "--time", action='store_true', default=False, dest="dump_time", help="Dump capture timestamps")
+    parser.add_argument("--hex", action='store_true', default=False, dest="dump_hex", help="With -t dump packets in hex and ASCII, otherwise only ASCII")
+    parser.add_argument("--network", action='store_true', default=False, dest="dump_network", help="With -1, -2, -v decode CNI and print available information about the network")
+    parser.add_argument("--bin", action='store_true', default=False, dest="dump_bin", help="With -t, -p, -v dump data in binary format instead of ASCII")
+    parser.add_argument("--time", action='store_true', default=False, dest="dump_time", help="Dump capture timestamps")
     # misc
-    parser.add_argument(      "--verbose", action='store_true', default=False)
-    parser.add_argument("-V", "--version", action='store_true', default=False, dest="version", help="Print the program version and exit")
-    return parser.parse_args()
+    parser.add_argument("--verbose", action='store_true', default=False)
+    parser.add_argument("--version", action='store_true', default=False, dest="version", help="Print the program version and exit")
+    opt = parser.parse_args()
 
 
 def main_func():
@@ -819,8 +826,8 @@ def main_func():
         opt.decode_caption = True
         opt.decode_vps = True
         opt.decode_wss = True
-        #TODO opt.decode_idl = True  # unsupported
-        #TODO opt.decode_xds = True  # unsupported
+        opt.decode_idl = True
+        opt.decode_xds = True
         opt.pfc_pgno = 0x1DF
 
     if sys.stdin.isatty():
@@ -865,7 +872,7 @@ def main_func():
 
 
 try:
-    opt = ParseCmdOptions()
+    ParseCmdOptions()
     main_func()
 except KeyboardInterrupt:
     pass

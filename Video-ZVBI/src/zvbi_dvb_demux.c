@@ -97,7 +97,6 @@ zvbi_xs_dvb_pes_handler( vbi_dvb_demux *        dx,
         if (PyErr_Occurred() != NULL) {
             PyErr_Print();
         }
-
     }
     return result;
 }
@@ -222,7 +221,7 @@ ZvbiDvbDemux_init(ZvbiDvbDemuxObj *self, PyObject *args, PyObject *kwds)
             self->demux_cb = callback;
             Py_INCREF(callback);
         }
-        if (self->demux_user_data != NULL) {
+        if (user_data != NULL) {
             self->demux_user_data = user_data;
             Py_INCREF(user_data);
         }

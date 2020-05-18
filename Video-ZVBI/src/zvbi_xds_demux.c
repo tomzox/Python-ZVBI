@@ -18,141 +18,233 @@
 #include <libzvbi.h>
 
 #include "zvbi_xds_demux.h"
+#include "zvbi_capture_buf.h"
 
-#if 0
 // ---------------------------------------------------------------------------
 // Extended Data Service (EIA 608) demultiplexer
 // ---------------------------------------------------------------------------
 
 typedef struct vbi_xds_demux_obj_struct {
-        vbi_xds_demux * ctx;
-        SV *            demux_cb;
-        SV *            demux_user_data;
-} VbiXds_DemuxObj;
+    PyObject_HEAD
+    vbi_xds_demux * ctx;
+    PyObject *      demux_cb;
+    PyObject *      demux_user_data;
+} ZvbiXdsDemuxObj;
+
+static PyObject * ZvbiXdsDemuxError;
 
 // ---------------------------------------------------------------------------
 
-vbi_bool
+static vbi_bool
 zvbi_xs_demux_xds_handler( vbi_xds_demux *        xd,
                            const vbi_xds_packet * xp,
                            void *                 user_data)
 {
-        VbiXds_DemuxObj * ctx = user_data;
-        I32  count;
-        vbi_bool result = FALSE;
+    ZvbiXdsDemuxObj * self = user_data;
+    PyObject * cb_rslt;
+    vbi_bool result = FALSE;
 
-        if ((ctx != NULL) && (ctx->demux_cb != NULL)) {
-                dSP ;
-                ENTER ;
-                SAVETMPS ;
-
-                /* push all function parameters on the Perl interpreter stack */
-                PUSHMARK(SP) ;
-                XPUSHs(sv_2mortal (newSViv (xp->xds_class)));
-                XPUSHs(sv_2mortal (newSViv (xp->xds_subclass)));
-                XPUSHs(sv_2mortal (newSVpvn ((char*)xp->buffer, xp->buffer_size)));
-                XPUSHs(ctx->demux_user_data);
-                PUTBACK ;
-
-                /* invoke the Perl subroutine */
-                count = call_sv(ctx->demux_cb, G_SCALAR) ;
-
-                SPAGAIN ;
-
-                if (count == 1) {
-                        result = POPi;
-                }
-
-                FREETMPS ;
-                LEAVE ;
+    if ((self != NULL) && (self->demux_cb != NULL)) {
+        // invoke the Python subroutine with parameters
+        if (self->demux_user_data != NULL) {
+            cb_rslt = PyObject_CallFunction(self->demux_cb, "IIy#O",
+                                            xp->xds_class, xp->xds_subclass,
+                                            xp->buffer, xp->buffer_size,
+                                            self->demux_user_data);
         }
-        return result;
+        else {
+            cb_rslt = PyObject_CallFunction(self->demux_cb, "IIy#",
+                                            xp->xds_class, xp->xds_subclass,
+                                            xp->buffer, xp->buffer_size);
+        }
+
+        // evaluate the boolean result
+        if (cb_rslt != NULL) {
+            result = (PyObject_IsTrue(cb_rslt) == 1);
+            Py_DECREF(cb_rslt);
+        }
+
+        // clear exceptions as we cannot handle them here
+        if (PyErr_Occurred() != NULL) {
+            PyErr_Print();
+        }
+    }
+    return result;
 }
 
 // ---------------------------------------------------------------------------
 
-VbiXds_DemuxObj *
-vbi_xds_demux_new(callback, user_data=NULL)
-        CV * callback
-        SV * user_data
-        CODE:
-        if (callback != NULL) {
-                Newxz(RETVAL, 1, VbiXds_DemuxObj);
-                RETVAL->ctx = vbi_xds_demux_new(zvbi_xs_demux_xds_handler, RETVAL);
+static PyObject *
+ZvbiXdsDemux_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+    return type->tp_alloc(type, 0);
+}
 
-                if (RETVAL->ctx != NULL) {
-                        RETVAL->demux_cb = SvREFCNT_inc(callback);
-                        RETVAL->demux_user_data = SvREFCNT_inc(user_data);
-                } else {
-                        Safefree(RETVAL);
-                        RETVAL = NULL;
-                }
-        } else {
-                croak("Callback must be defined");
-                RETVAL = NULL;
+static void
+ZvbiXdsDemux_dealloc(ZvbiXdsDemuxObj *self)
+{
+    if (self->ctx) {
+        vbi_xds_demux_delete(self->ctx);
+    }
+
+    if (self->demux_cb != NULL) {
+        Py_DECREF(self->demux_cb);
+    }
+    if (self->demux_user_data != NULL) {
+        Py_DECREF(self->demux_user_data);
+    }
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
+}
+
+static int
+ZvbiXdsDemux_init(ZvbiXdsDemuxObj *self, PyObject *args, PyObject *kwds)
+{
+    static char * kwlist[] = {"callback", "user_data", NULL};
+    PyObject * callback = NULL;
+    PyObject * user_data = NULL;
+    int RETVAL = -1;
+
+    // reset state in case the module is already initialized
+    if (self->ctx) {
+        vbi_xds_demux_delete(self->ctx);
+
+        if (self->demux_cb != NULL) {
+            Py_DECREF(self->demux_cb);
+            self->demux_cb = NULL;
         }
-        OUTPUT:
-        RETVAL
-
-void
-DESTROY(xd)
-        VbiXds_DemuxObj * xd
-        CODE:
-        vbi_xds_demux_delete(xd->ctx);
-        Save_SvREFCNT_dec(xd->demux_cb);
-        Save_SvREFCNT_dec(xd->demux_user_data);
-        Safefree(xd);
-
-void
-vbi_xds_demux_reset(xd)
-        VbiXds_DemuxObj * xd
-        CODE:
-        vbi_xds_demux_reset(xd->ctx);
-
-vbi_bool
-vbi_xds_demux_feed(xd, sv_buf)
-        VbiXds_DemuxObj * xd
-        SV * sv_buf
-        PREINIT:
-        uint8_t * p_buf;
-        STRLEN buf_size;
-        CODE:
-        if (SvOK(sv_buf)) {
-                p_buf = (uint8_t *) SvPV(sv_buf, buf_size);
-                if (buf_size >= 2) {
-                        RETVAL = vbi_xds_demux_feed(xd->ctx, p_buf);
-                } else {
-                        croak("Input buffer has less than 2 bytes");
-                        RETVAL = FALSE;
-                }
-        } else {
-                croak("Input buffer is undefined or not a scalar");
-                RETVAL = FALSE;
+        if (self->demux_user_data != NULL) {
+            Py_DECREF(self->demux_user_data);
+            self->demux_user_data = NULL;
         }
-        OUTPUT:
-        RETVAL
+        self->ctx = NULL;
+    }
 
-vbi_bool
-vbi_xds_demux_feed_frame(xd, sv_sliced, n_lines)
-        VbiXds_DemuxObj * xd
-        SV * sv_sliced
-        unsigned int n_lines
-        PREINIT:
-        vbi_sliced * p_sliced;
-        unsigned int max_lines;
-        CODE:
-        p_sliced = zvbi_xs_sv_to_sliced(sv_sliced, &max_lines);
-        if (p_sliced != NULL) {
-                if (n_lines <= max_lines) {
-                        RETVAL = vbi_xds_demux_feed_frame(xd->ctx, p_sliced, n_lines);
-                } else {
-                        croak("Invalid line count %d for buffer size (max. %d lines)", n_lines, max_lines);
-                        RETVAL = FALSE;
-                }
-        } else {
-                RETVAL = FALSE;
+    if (PyArg_ParseTupleAndKeywords(args, kwds, "O|O", kwlist,
+                                     &callback, &user_data))
+    {
+        self->ctx = vbi_xds_demux_new(zvbi_xs_demux_xds_handler, self);
+
+        if (self->ctx != NULL) {
+            if (callback != NULL) {
+                self->demux_cb = callback;
+                Py_INCREF(callback);
+            }
+            if (user_data != NULL) {
+                self->demux_user_data = user_data;
+                Py_INCREF(user_data);
+            }
+            RETVAL = 0;
         }
-        OUTPUT:
-        RETVAL
+        else {
+            PyErr_SetString(ZvbiXdsDemuxError, "Initialization failed");
+        }
+    }
+    return RETVAL;
+}
 
-#endif // 0
+static PyObject *
+ZvbiXdsDemux_reset(ZvbiXdsDemuxObj *self, PyObject *args)
+{
+    vbi_xds_demux_reset(self->ctx);
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+ZvbiXdsDemux_feed(ZvbiXdsDemuxObj *self, PyObject *args)
+{
+    PyObject * RETVAL = NULL;
+    Py_buffer feed_buf;
+
+    if (PyArg_ParseTuple(args, "y*", &feed_buf)) {
+        if (feed_buf.len >= 2) {
+            if (vbi_xds_demux_feed(self->ctx, feed_buf.buf)) {
+                RETVAL = Py_None;
+                Py_INCREF(Py_None);
+            }
+            else {
+                PyErr_SetString(ZvbiXdsDemuxError, "parity errors");
+            }
+        }
+        else {
+            PyErr_SetString(PyExc_ValueError, "input buffer has less than 2 bytes");
+        }
+        PyBuffer_Release(&feed_buf);
+    }
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiXdsDemux_feed_frame(ZvbiXdsDemuxObj *self, PyObject *args)
+{
+    PyObject * sliced_obj = NULL;
+    PyObject * RETVAL = NULL;
+
+    if (PyArg_ParseTuple(args, "O!", &ZvbiCaptureSlicedBufTypeDef, &sliced_obj)) {
+        vbi_capture_buffer * p_sliced = ZvbiCaptureBuf_GetBuf(sliced_obj);
+        unsigned n_lines = p_sliced->size / sizeof(vbi_sliced);
+
+        if (vbi_xds_demux_feed_frame(self->ctx, p_sliced->data, n_lines)) {
+            RETVAL = Py_None;
+            Py_INCREF(Py_None);
+        }
+        else {
+            PyErr_SetString(ZvbiXdsDemuxError, "parity errors");
+        }
+    }
+    return RETVAL;
+}
+
+// ---------------------------------------------------------------------------
+
+static PyMethodDef ZvbiXdsDemux_MethodsDef[] =
+{
+    {"reset",      (PyCFunction) ZvbiXdsDemux_reset,      METH_NOARGS, NULL },
+    {"feed",       (PyCFunction) ZvbiXdsDemux_feed,       METH_VARARGS, NULL },
+    {"feed_frame", (PyCFunction) ZvbiXdsDemux_feed_frame, METH_VARARGS, NULL },
+
+    {NULL}  /* Sentinel */
+};
+
+PyTypeObject ZvbiXdsDemuxTypeDef =
+{
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "Zvbi.XdsDemux",
+    .tp_doc = PyDoc_STR("Extended Data Service (EIA 608) demultiplexer"),
+    .tp_basicsize = sizeof(ZvbiXdsDemuxObj),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = ZvbiXdsDemux_new,
+    .tp_init = (initproc) ZvbiXdsDemux_init,
+    .tp_dealloc = (destructor) ZvbiXdsDemux_dealloc,
+    //.tp_repr = (PyObject * (*)(PyObject*)) ZvbiXdsDemux_Repr,
+    .tp_methods = ZvbiXdsDemux_MethodsDef,
+};
+
+int PyInit_XdsDemux(PyObject * module, PyObject * error_base)
+{
+    if (PyType_Ready(&ZvbiXdsDemuxTypeDef) < 0) {
+        return -1;
+    }
+
+    // create exception class
+    ZvbiXdsDemuxError = PyErr_NewException("Zvbi.XdsDemuxError", error_base, NULL);
+    Py_XINCREF(ZvbiXdsDemuxError);
+    if (PyModule_AddObject(module, "XdsDemuxError", ZvbiXdsDemuxError) < 0) {
+        Py_XDECREF(ZvbiXdsDemuxError);
+        Py_CLEAR(ZvbiXdsDemuxError);
+        Py_DECREF(module);
+        return -1;
+    }
+
+    // create class type object
+    Py_INCREF(&ZvbiXdsDemuxTypeDef);
+    if (PyModule_AddObject(module, "XdsDemux", (PyObject *) &ZvbiXdsDemuxTypeDef) < 0) {
+        Py_DECREF(&ZvbiXdsDemuxTypeDef);
+        Py_XDECREF(ZvbiXdsDemuxError);
+        Py_CLEAR(ZvbiXdsDemuxError);
+        return -1;
+    }
+
+    return 0;
+}

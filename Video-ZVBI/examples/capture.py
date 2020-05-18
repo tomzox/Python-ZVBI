@@ -364,5 +364,5 @@ def main_func():
 try:
     opt = ParseCmdOptions()
     main_func()
-except KeyboardInterrupt:
+except (KeyboardInterrupt, BrokenPipeError):
     pass

@@ -132,24 +132,26 @@ Special-purpose classes for DVB:
     Video Broadcasting (DVB); Specification for the carriage of Vertical
     Blanking Information (VBI) data in DVB bit-streams".
 
-Classes with interfaces supported in libzvbi, but not implemented in the
-Python module as the respective data services are obsolete:
+Classes for de-multiplexing data services transmitted within teletext
+packets. For PFC and IDL, libzvbi only supports the protocol, but the
+application has to decode and store payload data. XDS is supported by
+`Zvbi.ServiceDec`_ (decoding and event notifications). Most likely none
+of these protocols are used anymore, as they were intended for use via
+analog television broadcast:
 
 `Zvbi.IdlDemux`_
     This class allows decoding data transmissions within a Teletext
-    packet stream using **Independent Data Line** protocol (EN 300 708 section 6),
-    i.e. data transmissions based on packet 8/30. This service is most likely
-    obsolete today (replaced by mobile Internet).
+    packet stream using *Independent Data Line* protocol (EN 300 708 section 6),
+    i.e. data transmissions based on packet 8/30.
 `Zvbi.PfcDemux`_
-    Class for separating data transmitted in **Page Function Clear** teletext
+    Class for separating data transmitted in *Page Function Clear* teletext
     packets (ETS 300 708 section 4), i.e. using regular packets on a dedicated
-    teletext page. Historically this protocol was used for **Nextview EPG**,
-    (i.e. an Electronic Programming Guide for analog television). This
-    service is most likely obsolete today.
+    teletext page. Historically this protocol was used for *Nextview EPG*,
+    (i.e. an Electronic Programming Guide for analog television).
 `Zvbi.XdsDemux`_
-    Class for separating "Extended Data Service" from a Closed Caption stream
-    (EIA 608). This service allowed to transmit "now & next" EPG data in
-    addition to sub-titles. This service is most likely obsolete today.
+    Class for separating *Extended Data Service* from a Closed Caption stream
+    (EIA 608). This service allows to transmit "now & next" EPG data in
+    addition to sub-titles.
 
 .. _Zvbi.Capture:
 
@@ -3142,28 +3144,84 @@ Note: Kind and contents of log messages may change in the future.
 Class Zvbi.IdlDemux
 ===================
 
-The functions in this section decode data transmissions in
-Teletext **Independent Data Line** packets (EN 300 708 section 6),
-i.e. data transmissions based on packet 8/30.
+The functions in this section decode data transmissions in Teletext
+**Independent Data Line** packets (EN 300 708 section 6), i.e. data
+transmissions based on teletext packet 8/30.
 
-**Note this class is not implemented in the Python module as this service
-is believed to be obsolete.**
+The decoder only supports format A.
 
 Constructor Zvbi.IdlDemux()
 ---------------------------
 
 ::
 
-    idl = Zvbi.IdlDemux(channel, address [, callback, user_data] )
+    idl = Zvbi.IdlDemux(channel, address, callback, [user_data] )
 
 Creates and returns a new Independent Data Line format A
 (EN 300 708 section 6.5) demultiplexer.
 
-*channel* filter out packets of this channel.
-*address* filter out packets with this service data address.
-Optional: *callback* is a handler to be called by *idl.feed()*
-when new data is available.  If present, *user_data* is passed through
-to the handler function.
+Input parameters:
+
+:channel:
+    Process packets of this channel.
+:address:
+    Process packets with this service data address.
+:callback:
+    Parameters *callback* and optional *user_data* specify a handler and
+    passed-through parameter which is called when a new packet is available.
+    Passing the callback is mandatory as the data is otherwise discarded.
+:user_data:
+    This optional parameter is passed through to the callback function,
+    if specified. Else the *user_data* parameter to the callback is
+    omitted.
+
+The callback function is invoked with the following parameters for each
+received data packet:
+
+0. *buffer*: A bytes object containing the data received in the packet
+   (i.e. payload data after stripping teletext packet header)
+1. *flags*: A bit-wise OR of *VBI_IDL_DATA_* constants.
+2. Optionally the *user_data* object specified as constructor parameter;
+   if the parameter was specified to the constructor, it is omitted here.
+
+
+Zvbi.IdlDemux.feed()
+--------------------
+
+::
+
+    idl.feed(buf)
+
+This function takes 42 bytes of a Teletext packet, detects packets
+belonging to the configured data channel and address and calls the
+callback function given during context creation when new payload data is
+available.
+
+Parameter *buf* is a scalar containing a teletext packet's data
+(at least 42 bytes, i. e. without clock run-in and framing code),
+as returned by the slicer functions.
+
+The function returns *None*. Exception *Zvbi.IdlDemuxError* is raised if
+the buffer contained incorrectible errors.
+
+Zvbi.IdlDemux.feed_frame()
+--------------------------
+
+This function works like *idl.feed()* but takes a complete sliced buffer
+(i.e. a full frame's worth of sliced data as returned by
+`Zvbi.Capture.pull_sliced()`_) and automatically filters out all unrelated
+teletext packets.  This can be used to "short-circuit" the capture output
+with the demultiplexer. Example: ::
+
+    sliced_buf = cap.pull_sliced(1000)
+    idl.feed_frame(sliced_buf)
+
+The callback function given during context creation is called when new
+payload data is available.  The function returns *None*.  Exception
+*Zvbi.IdlDemuxError* is raised if any of the teletext packets in the buffer
+contained incorrectible errors.
+
+.. _Zvbi.PfcDemux:
 
 Zvbi.IdlDemux.reset()
 ---------------------
@@ -3174,39 +3232,6 @@ Zvbi.IdlDemux.reset()
 
 Resets the IDL demux context, useful for example after a channel change.
 
-Zvbi.IdlDemux.feed()
---------------------
-
-::
-
-    ok = idl.feed(buf)
-
-This function takes a stream of Teletext packets, filters out packets
-of the desired data channel and address and calls the handler
-given context creation when new user data is available.
-
-Parameter *buf* is a scalar containing a teletext packet's data
-(at last 42 bytes, i. e. without clock run-in and framing code),
-as returned by the slicer functions.  The function returns 0 if
-the packet contained incorrectable errors.
-
-Parameters to the handler are: *buffer*, *flags*, *user_data*.
-
-Zvbi.IdlDemux.feed_frame()
---------------------------
-
-::
-
-    ok = idl.feed_frame(sliced_buffer, n_lines)
-
-This function works like *idl.feed()* but takes a sliced
-buffer (i.e. a full frame's worth of sliced data) and automatically
-filters out all teletext lines.  This can be used to "short-circuit"
-the capture output with the demultiplexer.
-
-
-.. _Zvbi.PfcDemux:
-
 Class Zvbi.PfcDemux
 ===================
 
@@ -3214,24 +3239,74 @@ Separating data transmitted in Page Function Clear Teletext packets
 (ETS 300 708 section 4), i.e. using regular packets on a dedicated
 teletext page.
 
-**Note this class is not implemented in the Python module as this service
-is believed to be obsolete.**
-
 Constructor Zvbi.PfcDemux()
 ---------------------------
 
 ::
 
-    pfc = Zvbi.PfcDemux(pgno, stream [, callback, user_data] )
+    pfc = Zvbi.PfcDemux(pgno, stream, callback, [user_data] )
 
 Creates and returns a new demultiplexer context.
 
-Parameters: *page* specifies the teletext page on which the data is
-transmitted.  *stream* is the stream number to be demultiplexed.
+Input parameters:
 
-Optional parameter *callback* is a reference to a handler to be
-called by *pfc.feed()* when a new data block is available.
-Is present, *user_data* is passed through to the handler.
+:page:
+    Number of the teletext page on which the data is transmitted.
+    (Usually data is transmitted on a "non-decimal looking" page
+    number such as `1DF`.)
+:stream:
+    Number of the stream to be de-multiplexed.
+:callback:
+    Parameters *callback* and optional *user_data* specify a handler and
+    passed-through parameter which is called when a new packet is available.
+    Passing the callback is mandatory as the data is otherwise discarded.
+:user_data:
+    This optional parameter is passed through to the callback function,
+    if specified. Else the *user_data* parameter to the callback is
+    omitted.
+
+The callback function is invoked with the following parameters for each
+correctly assembled data block.
+
+0. *page*: Teletext page number given in constructor.
+1. *stream*: Stream identifier given in constructor.
+2. *application_id*: Application ID received in the AI block.
+3. *block*: A bytes object containing the data received in the block.
+4. Optionally the *user_data* object specified as constructor parameter;
+   if the parameter was specified to the constructor, it is omitted here.
+
+Note multiple small blocks may fit within a teletext packet; inversely
+larger blocks may span multiple teletext packets. Therefore the callback
+may be called 0, 1, or more times per received teletext packet.
+
+Zvbi.PfcDemux.feed()
+--------------------
+
+::
+
+    pfc.feed(buf)
+
+This function takes a raw stream of Teletext packets, detects if they
+belong to the requested page and stream and assembles the data transmitted
+in this packet in an internal buffer. When a data block is complete it
+calls the handler given during creation.
+
+Zvbi.PfcDemux.feed_frame()
+--------------------------
+
+This function works like *pfc.feed()* but takes a complete sliced buffer
+(i.e. a full frame's worth of sliced data as returned by
+`Zvbi.Capture.pull_sliced()`_) and automatically filters out all unrelated
+teletext packets.  This can be used to "short-circuit" the capture output
+with the demultiplexer. Example: ::
+
+    sliced_buf = cap.pull_sliced(1000)
+    pfc.feed_frame(sliced_buf)
+
+The callback function given during context creation is called when a new
+data block is complete.  The function returns *None*.  Exception
+*Zvbi.PfcDemuxError* is raised if any of the teletext packets in the buffer
+contained incorrectible errors.
 
 Zvbi.PfcDemux.reset()
 ---------------------
@@ -3242,39 +3317,6 @@ Zvbi.PfcDemux.reset()
 
 Resets the PFC demux context, useful for example after a channel change.
 
-Zvbi.PfcDemux.feed()
---------------------
-
-::
-
-    pfc.feed(buf)
-
-This function takes a raw stream of Teletext packets, filters out the
-requested page and stream and assembles the data transmitted in this
-page in an internal buffer. When a data block is complete it calls
-the handler given during creation.
-
-The handler is called with the following parameters:
-
-* *pgno* is the page number given during creation.
-* *stream* is the stream in which the block was received.
-* *application_id* is the application ID of the block.
-* *block* is a scalar holding the block's data.
-* Optional *user_data* is looped back here, if specified in the
-  *PfcDemux* constructor.
-
-Zvbi.PfcDemux.feed_frame()
---------------------------
-
-::
-
-    ok = pfc.feed_frame(sliced_buffer, n_lines)
-
-This function works like *pfc.feed()* but takes a sliced
-buffer (i.e. a full frame's worth of sliced data) and automatically
-filters out all teletext lines.  This can be used to "short-circuit"
-the capture output with the demultiplexer.
-
 
 .. _Zvbi.XdsDemux:
 
@@ -3284,30 +3326,27 @@ Class Zvbi.XdsDemux
 Separating "Extended Data Service" (XDS) from a Closed Caption stream (EIA
 608).
 
-**Note this class is not implemented in the Python module as this service
-is believed to be obsolete.**
-
 Constructor Zvbi.XdsDemux()
 ---------------------------
 
 ::
 
-    xds = Zvbi.XdsDemux( [callback, user_data] )
+    xds = Zvbi.XdsDemux(callback, user_data)
 
 Creates and returns a new Extended Data Service (EIA 608) demultiplexer.
 
-The optional parameters *callback* and *user_data* specify
-a handler and passed-through parameter which is called when
-a new packet is available.
+Parameters *callback* and optionally *user_data* specify a handler and
+passed-through parameter which is called when a new packet is available.
+Passing the callback is mandatory as the data is otherwise discarded.
 
-Zvbi.XdsDemux.reset()
----------------------
+The callback function is invoked with the following parameters:
 
-::
-
-    xds.reset()
-
-Resets the XDS demux, useful for example after a channel change.
+0. *xds_class* is the XDS packet class, i.e. one of the `VBI_XDS_CLASS_*`
+   constants.
+1. *xds_subclass* holds the subclass; meaning depends on the main class.
+2. *buffer* is a bytes object holding the packet data (already parity decoded.)
+3. Optionally *user_data*, if specified as constructor parameter; else the
+   parameter is omitted.
 
 Zvbi.XdsDemux.feed()
 --------------------
@@ -3316,34 +3355,42 @@ Zvbi.XdsDemux.feed()
 
     xds.feed(buf)
 
-This function takes two successive bytes of a raw Closed Caption
-stream, filters out XDS data and calls the handler function given
-during context creation when a new packet is complete.
+This function takes two successive bytes of a raw Closed Caption stream,
+filters out XDS data and calls the handler function given during context
+creation when a new packet is complete.
 
-Parameter *buf* is a scalar holding data from NTSC line 284
-(as returned by the slicer functions.)  Only the first two bytes
-in the buffer hold valid data.
+Parameter *buf* is a bytes-like object holding data from NTSC line 284 (as
+returned by the slicer functions.)  Only the first two bytes in the buffer
+are used.
 
-Returns 0 if the buffer contained parity errors.
-
-The handler is called with the following parameters:
-*xds_class* is the XDS packet class, i.e. one of the `VBI_XDS_CLASS_*`
-constants.
-*xds_subclass* holds the subclass; meaning depends on the main class.
-*buffer* is a scalar holding the packet data (already parity decoded.)
-optional *user_data* is passed through from the creation.
+The function returns *None*. Exception *Zvbi.XdsDemuxError* is raised if
+the buffer contained parity errors.
 
 Zvbi.XdsDemux.feed_frame()
 --------------------------
 
+This function works like *xds.feed()* but takes a complete sliced buffer
+(i.e. a full frame's worth of sliced data as returned by
+`Zvbi.Capture.pull_sliced()`_) and automatically filters out all
+non-closed caption lines.  This can be used to "short-circuit" the capture
+output with the demultiplexer. Example: ::
+
+    sliced_buf = cap.pull_sliced(1000)
+    xds.feed_frame(sliced_buf)
+
+The callback function given during context creation is called when a new
+packet is complete.  The function returns *None*.  Exception
+*Zvbi.XdsDemuxError* is raised if any of the CC lines in the buffer
+contained parity errors.
+
+Zvbi.XdsDemux.reset()
+---------------------
+
 ::
 
-    ok = xds.feed_frame(sliced_buffer, n_lines)
+    xds.reset()
 
-This function works like *xds.feed()* but takes a sliced
-buffer (i.e. a full frame's worth of sliced data) and automatically
-filters out all teletext lines.  This can be used to "short-circuit"
-the capture output with the demultiplexer.
+Resets the XDS demux context, useful for example after a channel change.
 
 
 Miscellaneous (Zvbi)
