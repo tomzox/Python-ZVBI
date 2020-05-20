@@ -32,7 +32,7 @@ typedef struct {
     vbi_export * ctx;
 } ZvbiExportObj;
 
-PyObject * ZvbiExportError;
+static PyObject * ZvbiExportError;
 
 // ---------------------------------------------------------------------------
 
@@ -462,12 +462,14 @@ ZvbiExport_to_stdio(ZvbiExportObj *self, PyObject *args)
         FILE * fp = fdopen(fd, "w");
         if (fp != NULL) {
             vbi_page * page = ZvbiPage_GetPageBuf(pg_obj);
-            if (vbi_export_stdio(self->ctx, fp, page)) {
-                Py_INCREF(Py_None);
-                RETVAL = Py_None;
-            }
-            else {
-                PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+            if (page != NULL) {
+                if (vbi_export_stdio(self->ctx, fp, page)) {
+                    Py_INCREF(Py_None);
+                    RETVAL = Py_None;
+                }
+                else {
+                    PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+                }
             }
         }
         else {
@@ -486,12 +488,14 @@ ZvbiExport_to_file(ZvbiExportObj *self, PyObject *args)
 
     if (PyArg_ParseTuple(args, "O!s", &ZvbiPageTypeDef, &pg_obj, &file_name)) {
         vbi_page * page = ZvbiPage_GetPageBuf(pg_obj);
-        if (vbi_export_file(self->ctx, file_name, page)) {
-            Py_INCREF(Py_None);
-            RETVAL = Py_None;
-        }
-        else {
-            PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+        if (page != NULL) {
+            if (vbi_export_file(self->ctx, file_name, page)) {
+                Py_INCREF(Py_None);
+                RETVAL = Py_None;
+            }
+            else {
+                PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+            }
         }
     }
     return RETVAL;
@@ -505,14 +509,16 @@ ZvbiExport_to_memory(ZvbiExportObj *self, PyObject *args)
 
     if (PyArg_ParseTuple(args, "O!", &ZvbiPageTypeDef, &pg_obj)) {
         vbi_page * page = ZvbiPage_GetPageBuf(pg_obj);
-        char * p_buf;
-        size_t buf_size;
-        if (vbi_export_alloc(self->ctx, (void**)&p_buf, &buf_size, page)) {
-            RETVAL = PyBytes_FromStringAndSize(p_buf, buf_size);;
-            free(p_buf);
-        }
-        else {
-            PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+        if (page != NULL) {
+            char * p_buf;
+            size_t buf_size;
+            if (vbi_export_alloc(self->ctx, (void**)&p_buf, &buf_size, page)) {
+                RETVAL = PyBytes_FromStringAndSize(p_buf, buf_size);;
+                free(p_buf);
+            }
+            else {
+                PyErr_SetString(ZvbiExportError, vbi_export_errstr(self->ctx));
+            }
         }
     }
     return RETVAL;

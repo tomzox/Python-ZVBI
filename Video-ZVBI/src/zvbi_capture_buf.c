@@ -24,8 +24,10 @@
 typedef struct {
     PyObject_HEAD
     vbi_capture_buffer * buf;
-    vbi_bool need_free;
-    int iter_idx;
+    vbi_bool             need_free;
+    int                  iter_idx;
+    const int *          p_validity_src;
+    int                  validity_id;
 } ZvbiCaptureBufObj;
 
 #if defined (NAMED_TUPLE_GC_BUG)
@@ -56,10 +58,27 @@ ZvbiCaptureBuf_dealloc(ZvbiCaptureBufObj *self)
     Py_TYPE(self)->tp_free((PyObject *) self);
 }
 
+static int
+ZvbiCaptureBuf_CheckValid(ZvbiCaptureBufObj * self)
+{
+    if ((self->buf == NULL) || (self->buf->data == NULL) ||
+        ((self->p_validity_src != NULL) && (*self->p_validity_src != self->validity_id)))
+    {
+        PyErr_SetString(PyExc_ValueError, "Capture buffer is no longer valid");
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static PyObject *
 ZvbiCaptureBufGetTimestamp(ZvbiCaptureBufObj * self, void * closure)
 {
-    return PyFloat_FromDouble(self->buf->timestamp);
+    PyObject * RETVAL = NULL;
+
+    if (ZvbiCaptureBuf_CheckValid(self)) {
+        RETVAL = PyFloat_FromDouble(self->buf->timestamp);
+    }
+    return RETVAL;
 }
 
 // ---------------------------------------------------------------------------
@@ -68,52 +87,66 @@ ZvbiCaptureBufGetTimestamp(ZvbiCaptureBufObj * self, void * closure)
 static int
 ZvbiCaptureRawBuf_GetBuffer(ZvbiCaptureBufObj * self, Py_buffer * view, int flags)
 {
-    if ((self->buf != NULL) && ((flags & PyBUF_WRITABLE) == 0)) {
-        view->obj = (PyObject*) self;
-        view->buf = self->buf->data;
-        view->len = self->buf->size;
-        view->itemsize = 1;
-        view->ndim = 1;
-        view->shape = &view->len;
-        view->strides = &view->itemsize;
-        view->suboffsets = NULL;
-        view->format = NULL;
-        view->readonly = TRUE;
+    int result = -1;
 
-        Py_INCREF(self);
-        return 0;
+    if (ZvbiCaptureBuf_CheckValid(self)) {
+        if ((flags & PyBUF_WRITABLE) == 0) {
+            view->obj = (PyObject*) self;
+            view->buf = self->buf->data;
+            view->len = self->buf->size;
+            view->itemsize = 1;
+            view->ndim = 1;
+            view->shape = &view->len;
+            view->strides = &view->itemsize;
+            view->suboffsets = NULL;
+            view->format = NULL;
+            view->readonly = TRUE;
+
+            Py_INCREF(self);
+            result = 0;
+        }
+        else {
+            PyErr_SetString(PyExc_BufferError, "CaptureBuf object is read-only");
+            view->obj = NULL;
+        }
     }
     else {
-        PyErr_SetNone(PyExc_BufferError);
         view->obj = NULL;
-        return -1;
     }
+    return result;
 }
 
 /*
  * Implmentation of the len() operator
  */
-Py_ssize_t ZvbiCaptureRawBuf_MappingLength(ZvbiCaptureBufObj * self)
+Py_ssize_t
+ZvbiCaptureRawBuf_MappingLength(ZvbiCaptureBufObj * self)
 {
-    return ((self->buf != NULL) ? self->buf->size : -1);
+    if (ZvbiCaptureBuf_CheckValid(self)) {
+        return self->buf->size;
+    }
+    return -1;
 }
 
 /*
  * Implementation of sub-script look-up (as alternative to iterator)
  */
-PyObject * ZvbiCaptureRawBuf_MappingSubscript(ZvbiCaptureBufObj * self, PyObject * key)
+PyObject *
+ZvbiCaptureRawBuf_MappingSubscript(ZvbiCaptureBufObj * self, PyObject * key)
 {
     PyObject * RETVAL = NULL;
 
-    // FIXME support argement of type slice
-    long idx = PyLong_AsLong(key);
-    if (idx >= 0) {
-        if ((self->buf != NULL) && (idx < self->buf->size)) {
-            uint8_t * item = (uint8_t*)self->buf->data + idx;
-            RETVAL = PyLong_FromLong((unsigned long)*item);
-        }
-        else {
-            PyErr_SetNone(PyExc_IndexError);
+    if (ZvbiCaptureBuf_CheckValid(self)) {
+        // FIXME support argement of type slice
+        long idx = PyLong_AsLong(key);
+        if (idx >= 0) {
+            if ((self->buf != NULL) && (idx < self->buf->size)) {
+                uint8_t * item = (uint8_t*)self->buf->data + idx;
+                RETVAL = PyLong_FromLong((unsigned long)*item);
+            }
+            else {
+                PyErr_SetNone(PyExc_IndexError);
+            }
         }
     }
     return RETVAL;
@@ -128,9 +161,14 @@ PyObject * ZvbiCaptureRawBuf_MappingSubscript(ZvbiCaptureBufObj * self, PyObject
 static PyObject *
 ZvbiCaptureSlicedBuf_Iter(ZvbiCaptureBufObj *self)
 {
-    Py_INCREF(self);  // Note corresponding DECREF is done by caller after end of iteration
-    self->iter_idx = 0;
-    return (PyObject *) self;
+    PyObject * RETVAL = NULL;
+
+    if (ZvbiCaptureBuf_CheckValid(self)) {
+        Py_INCREF(self);  // Note corresponding DECREF is done by caller after end of iteration
+        self->iter_idx = 0;
+        RETVAL = (PyObject*) self;
+    }
+    return RETVAL;
 }
 
 /*
@@ -143,27 +181,29 @@ ZvbiCaptureSlicedBuf_IterNext(ZvbiCaptureBufObj *self)
     vbi_sliced * p_sliced = NULL;
     PyObject * RETVAL = NULL;
 
-    vbi_capture_buffer * p_sliced_buf = self->buf;
-    if (p_sliced_buf != NULL) {
-        max_lines = p_sliced_buf->size / sizeof(vbi_sliced);
-        p_sliced = p_sliced_buf->data;
-    }
-    if ((p_sliced != NULL) && (self->iter_idx < max_lines)) {
-        p_sliced += self->iter_idx;
-
-        RETVAL = PyStructSequence_New(ZvbiCaptureSlicedLineType);
-        if (RETVAL != NULL) {
-            PyStructSequence_SetItem(RETVAL, 0, PyBytes_FromStringAndSize((char*)p_sliced->data,
-                                                                          sizeof(p_sliced->data)));
-            PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(p_sliced->id));
-            PyStructSequence_SetItem(RETVAL, 2, PyLong_FromLong(p_sliced->line));
-
-            self->iter_idx += 1;
+    if (ZvbiCaptureBuf_CheckValid(self)) {
+        vbi_capture_buffer * p_sliced_buf = self->buf;
+        if (p_sliced_buf != NULL) {
+            max_lines = p_sliced_buf->size / sizeof(vbi_sliced);
+            p_sliced = p_sliced_buf->data;
         }
-    }
-    else {
-        PyErr_SetNone(PyExc_StopIteration);
-        self->iter_idx = -1;
+        if ((p_sliced != NULL) && (self->iter_idx < max_lines)) {
+            p_sliced += self->iter_idx;
+
+            RETVAL = PyStructSequence_New(ZvbiCaptureSlicedLineType);
+            if (RETVAL != NULL) {
+                PyStructSequence_SetItem(RETVAL, 0, PyBytes_FromStringAndSize((char*)p_sliced->data,
+                                                                              sizeof(p_sliced->data)));
+                PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(p_sliced->id));
+                PyStructSequence_SetItem(RETVAL, 2, PyLong_FromLong(p_sliced->line));
+
+                self->iter_idx += 1;
+            }
+        }
+        else {
+            PyErr_SetNone(PyExc_StopIteration);
+            self->iter_idx = -1;
+        }
     }
     return RETVAL;
 }
@@ -171,15 +211,18 @@ ZvbiCaptureSlicedBuf_IterNext(ZvbiCaptureBufObj *self)
 /*
  * Implmentation of the len() operator
  */
-Py_ssize_t ZvbiCaptureSlicedBuf_MappingLength(ZvbiCaptureBufObj * self)
+Py_ssize_t
+ZvbiCaptureSlicedBuf_MappingLength(ZvbiCaptureBufObj * self)
 {
     Py_ssize_t result = -1;
 
-    vbi_capture_buffer * p_sliced_buf = self->buf;
-    if (p_sliced_buf != NULL) {
-        // note "size" element was calculated from "n_lines" slicer result
-        // (i.e. not the allocated buffer size, which may be larger)
-        result = p_sliced_buf->size / sizeof(vbi_sliced);
+    if (ZvbiCaptureBuf_CheckValid(self)) {
+        vbi_capture_buffer * p_sliced_buf = self->buf;
+        if (p_sliced_buf != NULL) {
+            // note "size" element was calculated from "n_lines" slicer result
+            // (i.e. not the allocated buffer size, which may be larger)
+            result = p_sliced_buf->size / sizeof(vbi_sliced);
+        }
     }
     return result;
 }
@@ -193,29 +236,31 @@ PyObject * ZvbiCaptureSlicedBuf_MappingSubscript(ZvbiCaptureBufObj * self, PyObj
     unsigned max_lines = 0;
     PyObject * RETVAL = NULL;
 
-    // FIXME support argement of type slice
-    long idx = PyLong_AsLong(key);
-    if (idx >= 0) {
-        vbi_capture_buffer * p_sliced_buf = self->buf;
-        if (p_sliced_buf != NULL) {
-            // note "size" element was calculated from "n_lines" slicer result
-            // (i.e. not the allocated buffer size, which may be larger)
-            max_lines = p_sliced_buf->size / sizeof(vbi_sliced);
-            p_sliced = p_sliced_buf->data;
-        }
-        if ((p_sliced != NULL) && (idx < max_lines)) {
-            p_sliced += idx;
-
-            RETVAL = PyStructSequence_New(ZvbiCaptureSlicedLineType);
-            if (RETVAL != NULL) {
-                PyStructSequence_SetItem(RETVAL, 0, PyBytes_FromStringAndSize((char*)p_sliced->data,
-                                                                              sizeof(p_sliced->data)));
-                PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(p_sliced->id));
-                PyStructSequence_SetItem(RETVAL, 2, PyLong_FromLong(p_sliced->line));
+    if (ZvbiCaptureBuf_CheckValid(self)) {
+        // FIXME support argement of type slice
+        long idx = PyLong_AsLong(key);
+        if (idx >= 0) {
+            vbi_capture_buffer * p_sliced_buf = self->buf;
+            if (p_sliced_buf != NULL) {
+                // note "size" element was calculated from "n_lines" slicer result
+                // (i.e. not the allocated buffer size, which may be larger)
+                max_lines = p_sliced_buf->size / sizeof(vbi_sliced);
+                p_sliced = p_sliced_buf->data;
             }
-        }
-        else {
-            PyErr_SetNone(PyExc_IndexError);
+            if ((p_sliced != NULL) && (idx < max_lines)) {
+                p_sliced += idx;
+
+                RETVAL = PyStructSequence_New(ZvbiCaptureSlicedLineType);
+                if (RETVAL != NULL) {
+                    PyStructSequence_SetItem(RETVAL, 0, PyBytes_FromStringAndSize((char*)p_sliced->data,
+                                                                                  sizeof(p_sliced->data)));
+                    PyStructSequence_SetItem(RETVAL, 1, PyLong_FromLong(p_sliced->id));
+                    PyStructSequence_SetItem(RETVAL, 2, PyLong_FromLong(p_sliced->line));
+                }
+            }
+            else {
+                PyErr_SetNone(PyExc_IndexError);
+            }
         }
     }
     return RETVAL;
@@ -323,23 +368,34 @@ static PyStructSequence_Desc ZvbiCaptureSlicedLineDef =
 // ---------------------------------------------------------------------------
 // External interface for instantiation
 
-vbi_capture_buffer * ZvbiCaptureBuf_GetBuf(PyObject * self)
+vbi_capture_buffer *
+ZvbiCaptureBuf_GetBuf(PyObject * obj)
 {
-    assert(PyObject_IsInstance(self, (PyObject*)&ZvbiCaptureBufTypeDef) == 1);
-    return ((ZvbiCaptureBufObj*)self)->buf;
-}
+    assert(PyObject_IsInstance(obj, (PyObject*)&ZvbiCaptureBufTypeDef) == 1);
+    ZvbiCaptureBufObj * self = (ZvbiCaptureBufObj*) obj;
 
-PyObject * ZvbiCaptureRawBuf_FromPtr(vbi_capture_buffer * ptr)
-{
-    PyObject * self = ZvbiCaptureBuf_new(&ZvbiCaptureRawBufTypeDef, NULL, NULL);
-    if (self != NULL) {
-        ((ZvbiCaptureBufObj*)self)->buf = ptr;
-        ((ZvbiCaptureBufObj*)self)->need_free = FALSE;
+    if (ZvbiCaptureBuf_CheckValid(self) == FALSE) {
+        PyErr_SetString(PyExc_ValueError, "Buffer content is no longer valid");
     }
-    return self;
+    return self->buf;
 }
 
-PyObject * ZvbiCaptureRawBuf_FromData(char * data, int size, double timestamp)
+PyObject *
+ZvbiCaptureRawBuf_FromPtr(vbi_capture_buffer * ptr, const int * validity_src)
+{
+    ZvbiCaptureBufObj * self = (ZvbiCaptureBufObj*) ZvbiCaptureBuf_new(&ZvbiCaptureRawBufTypeDef, NULL, NULL);
+    if (self != NULL) {
+        self->buf = ptr;
+        self->need_free = FALSE;
+
+        self->p_validity_src = validity_src;
+        self->validity_id = *validity_src;
+    }
+    return (PyObject*) self;
+}
+
+PyObject *
+ZvbiCaptureRawBuf_FromData(char * data, int size, double timestamp)
 {
     ZvbiCaptureBufObj * self = (ZvbiCaptureBufObj*) ZvbiCaptureBuf_new(&ZvbiCaptureRawBufTypeDef, NULL, NULL);
     if (self != NULL) {
@@ -352,17 +408,22 @@ PyObject * ZvbiCaptureRawBuf_FromData(char * data, int size, double timestamp)
     return (PyObject*) self;
 }
 
-PyObject * ZvbiCaptureSlicedBuf_FromPtr(vbi_capture_buffer * ptr)
+PyObject *
+ZvbiCaptureSlicedBuf_FromPtr(vbi_capture_buffer * ptr, const int * validity_src)
 {
-    PyObject * self = ZvbiCaptureBuf_new(&ZvbiCaptureSlicedBufTypeDef, NULL, NULL);
+    ZvbiCaptureBufObj * self = (ZvbiCaptureBufObj*) ZvbiCaptureBuf_new(&ZvbiCaptureSlicedBufTypeDef, NULL, NULL);
     if (self != NULL) {
-        ((ZvbiCaptureBufObj*)self)->buf = ptr;
-        ((ZvbiCaptureBufObj*)self)->need_free = FALSE;
+        self->buf = ptr;
+        self->need_free = FALSE;
+
+        self->p_validity_src = validity_src;
+        self->validity_id = *validity_src;
     }
-    return self;
+    return (PyObject*) self;
 }
 
-PyObject * ZvbiCaptureSlicedBuf_FromData(vbi_sliced * data, int n_lines, double timestamp)
+PyObject *
+ZvbiCaptureSlicedBuf_FromData(vbi_sliced * data, int n_lines, double timestamp)
 {
     ZvbiCaptureBufObj * self = (ZvbiCaptureBufObj*) ZvbiCaptureBuf_new(&ZvbiCaptureSlicedBufTypeDef, NULL, NULL);
     if (self != NULL) {

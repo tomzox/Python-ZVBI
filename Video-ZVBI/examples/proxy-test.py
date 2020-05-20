@@ -460,10 +460,10 @@ def main():
                      print("Receiving frames with %d sliced lines" % last_line_count, file=sys.stderr)
 
                except Zvbi.CaptureError as e:
-                  if "timeout" not in str(e):
-                     print("VBI read error:", e, file=sys.stderr)
-                     break
-                  else:
+                  print("VBI read error:", e, file=sys.stderr)
+                  break
+               except Zvbi.CaptureTimeout:
+                  if (opt.debug_level > 0):
                      print("proxy-test: timeout in VBI read", file=sys.stderr)
 
             else:
@@ -491,10 +491,10 @@ def main():
                         print("CC data 0x%02X,%02X" % (Zvbi.unpar8(data[0]), Zvbi.unpar8(data[1])))
 
                except Zvbi.CaptureError as e:
-                  if "timeout" not in str(e):
-                     print("VBI read error:", e, file=sys.stderr)
-                     break
-                  elif (opt.debug_level > 0):
+                  print("VBI read error:", e, file=sys.stderr)
+                  break
+               except Zvbi.CaptureTimeout:
+                  if (opt.debug_level > 0):
                      print("VBI read timeout", file=sys.stderr)
 
       del cap

@@ -184,15 +184,16 @@ usually done at device driver level). In contrast the functions named
 and just return a reference to this buffer. Usually this allows the device
 driver to avoid any copying, however not all devices support this (e.g.
 the Linux DVB driver does not support, i.e. there is no difference in
-performance between *read* and *pull*).  When you need to access the
-captured data directly via Python, choose the read functions. When you use
-functions of this module for further decoding, you should use the pull
-functions since these are usually more efficient.
+performance between *read* and *pull*). Therefore you generally should
+prefer use of the *pull* functions; only when capturing raw data for
+processing by Python directly, prefer *read_raw()* as the data needs
+to be copied into a permanent buffer anyway.
 
 If you do not need "raw" data (i.e. if you do not use the `Zvbi.RawDec`_
-class, you should use *read_sliced()* or *pull_sliced()* to avoid the
-overhead of returning raw data (which has high bandwidth). DVB devices
-will not return raw data regardless of the chosen interface.
+class, you should use *pull_sliced()* or *read_sliced()* instead of
+*pull()* or *read()* to avoid the overhead of returning raw data (which
+has high bandwidth). DVB devices will not return raw data regardless of
+the chosen interface.
 
 
 Constructor Zvbi.Capture()
@@ -327,11 +328,10 @@ object of type `Zvbi.CaptureRawBuf`_. Please refer to the descripion of
 that class for details.
 
 Parameter *timeout_ms* gives the limit for waiting for data in
-milliseconds; if no data arrives within the timeout, the function
-raises exception *Zvbi.CaptureError* with text indicating timeout.
-The same exception is raised upon error indications from the device.
-Note the function may fail if the device does not support
-reading data in raw format.
+milliseconds; if no data arrives within the given time, the function
+raises exception *Zvbi.CaptureTimeout*.  Exception *Zvbi.CaptureError* is
+raised upon error indications from the device.  Note the function may fail
+if the device does not support reading data in raw format.
 
 Note: it's generally more efficient to use *pull_raw()* instead, as
 that may avoid having copying data into the new buffer allocated
@@ -350,11 +350,9 @@ within an object of type `Zvbi.CaptureSlicedBuf`_. Please refer to the
 descripion of that class for details.
 
 Parameter *timeout_ms* gives the limit for waiting for data in
-milliseconds; if no data arrives within the timeout, the function
-raises exception *Zvbi.CaptureError* with text indicating timeout.
-The same exception is raised upon error indications from the device.
-Note the function may fail if the device does not support
-reading data in raw format.
+milliseconds; if no data arrives within the given time, the function
+raises exception *Zvbi.CaptureTimeout*.  Exception *Zvbi.CaptureError* is
+raised upon error indications from the device.
 
 Zvbi.Capture.read()
 -------------------
@@ -373,7 +371,12 @@ of these classes for details.
 Some devices, such as DVB, may not support capturing raw VBI data. In such
 a case the first element of the result tuple is set to *None*.
 
-Note: Depending on the driver, captured raw data may have to be copied
+Parameter *timeout_ms* gives the limit for waiting for data in
+milliseconds; if no data arrives within the given time, the function
+raises exception *Zvbi.CaptureTimeout*.  Exception *Zvbi.CaptureError* is
+raised upon error indications from the device.
+
+**Note**: Depending on the driver, captured raw data may have to be copied
 from the capture buffer into the given buffer (e.g. for V4L2 streams which
 use memory-mapped buffers.)  It's generally more efficient using one of
 the following *pull* interfaces. Also, unless you require raw data, it is
@@ -390,20 +393,18 @@ Read a raw VBI frame from the capture context and return it within an
 object of type `Zvbi.CaptureRawBuf`_. Please refer to the descripion of
 that class for details.  **Note**: The content of the returned object
 remains valid only until the next call to this or any other *pull*
-function.
+function. Access to an invalidated buffer will raise exception
+*ValueError*
 
-The *raw_buffer* can be passed to `Zvbi.RawDec.decode()`_.  If you
+The returned *raw_buffer* can be passed to `Zvbi.RawDec.decode()`_.  If you
 need to process the data by Python code, use `Zvbi.Capture.read_raw()`_
-instead.  (When processing raw data directly in the Python script,
-*read_raw()* is more efficient as it may avoid copying the data out of the
-internal buffer into a Python object, depending how it is accessed.)
+instead.
 
 Parameter *timeout_ms* gives the limit for waiting for data in
-milliseconds; if no data arrives within the timeout, the function
-raises exception *Zvbi.CaptureError* with text indicating timeout.
-The same exception is raised upon error indications from the device.
-Note the function may fail if the device does not support
-reading data in raw format.
+milliseconds; if no data arrives within the given time, the function
+raises exception *Zvbi.CaptureTimeout*.  Exception *Zvbi.CaptureError* is
+raised upon error indications from the device.  Note the function may fail
+if the device does not support reading data in raw format.
 
 
 Zvbi.Capture.pull_sliced()
@@ -418,17 +419,16 @@ for VBI lines of previously configured services, and returns the sliced data
 within an object of type `Zvbi.CaptureSlicedBuf`_. Please refer to the
 descripion of that class for details.  **Note**: The content of the
 returned object remains valid only until the next call to this or any
-other *pull* function.
+other capture function.  Access to an invalidated buffer will raise
+exception *ValueError*
 
 Usually the returned *sliced_buffer* is passed immediately
 `Zvbi.ServiceDec.decode()`_.
 
 Parameter *timeout_ms* gives the limit for waiting for data in
-milliseconds; if no data arrives within the timeout, the function
-raises exception *Zvbi.CaptureError* with text indicating timeout.
-The same exception is raised upon error indications from the device.
-Note the function may fail if the device does not support
-reading data in raw format.
+milliseconds; if no data arrives within the given time, the function
+raises exception *Zvbi.CaptureTimeout*.  Exception *Zvbi.CaptureError* is
+raised upon error indications from the device.
 
 Zvbi.Capture.pull()
 -------------------
@@ -444,15 +444,17 @@ form of a tuple which contains firstly `Zvbi.CaptureRawBuf`_ and secondly
 an object of type `Zvbi.CaptureSlicedBuf`_. Please refer to the descripion
 of these classes for details.
 
+Some devices, such as DVB, may not support capturing raw VBI data. In such
+a case the first element of the result tuple is set to *None*.
+
 **Note**: The content of the returned objects remains valid only until the
-next call to this or any other *pull* function.
+next call to this or any other *pull* function. Access to an invalidated
+buffer will raise exception *ValueError*
 
 Parameter *timeout_ms* gives the limit for waiting for data in
-milliseconds; if no data arrives within the timeout, the function
-raises exception *Zvbi.CaptureError* with text indicating timeout.
-The same exception is raised upon error indications from the device.
-Note the function may fail if the device does not support
-reading data in raw format.
+milliseconds; if no data arrives within the given time, the function
+raises exception *Zvbi.CaptureTimeout*.  Exception *Zvbi.CaptureError* is
+raised upon error indications from the device.
 
 Zvbi.Capture.parameters()
 -------------------------
@@ -1533,8 +1535,12 @@ Although safe to do, this function is not supposed to be called from
 an event handler since rendering may block decoding for extended
 periods of time.
 
-The returned object must be deleted to release resources which are
-locked internally in the library during the fetch.
+**Note**: The returned object must be deleted to release resources which
+are locked internally in the library during the fetch. Page objects
+support Python's "Context Manager" protocol to allow doing this easily
+using the "with" statement. See the description of `Zvbi.Page`_ for an
+example.
+
 
 Zvbi.ServiceDec.fetch_cc_page()
 -------------------------------
@@ -1565,8 +1571,11 @@ Although safe to do, this function is not supposed to be called from an
 event handler, since rendering may block decoding for extended periods of
 time.
 
-The returned object must be deleted to release resources which are
-locked internally in the library during the fetch.
+**Note**: The returned object must be deleted to release resources which
+are locked internally in the library during the fetch. Page objects
+support Python's "Context Manager" protocol to allow doing this easily
+using the "with" statement. See the description of `Zvbi.Page`_ for an
+example.
 
 Zvbi.ServiceDec.page_title()
 ----------------------------
@@ -1845,7 +1854,7 @@ Constructor Zvbi.Search()
 
     search = Zvbi.Search(decoder=vt, pattern="",
                          page=0x100, subno=Zvbi.VBI_ANY_SUBNO,
-                         casefold=False, regexp=False,
+                         casefold=False, regexp=False, direction=1,
                          progress=None, user_data=None)
 
 Create a search context and prepare for searching the Teletext page
@@ -1853,21 +1862,31 @@ cache with the given sub-string or regular expression.
 
 Input Parameters:
 
+:decoder:
+    Reference to an instance of `Zvbi.ServiceDec`_ that contains the page
+    cache which is to be searched.
+
 :pattern:
     Contains the search pattern (libzvbi expects the string in UTF-8
     encoding; the conversion from Unicode used by Python strings is done
     automatically).
 
 :page:
-    Teletext page number. Not the number is hexadecimal, which means to
-    retrieve text page "100", pass number 0x100. Teletext also allows
-    hexadecimal page numbers (sometimes used for transmitting hidden
-    data), so allowed is the full range of 0x100 to 0x8FF.
+    Page number of the first (forward) or last (backward) page to visit.
+    Note the number is hexadecimal, which means to retrieve text page
+    "100", pass number 0x100. Teletext also allows hexadecimal page
+    numbers (sometimes used for transmitting hidden data), so allowed is
+    the full range of 0x100 to 0x8FF.
 
 :subno:
     Defaults to `Zvbi.VBI_ANY_SUBNO`, which means the newest sub-page of
     the given page is returned. Else this is a sub-page number in range 0
     to 0x3F7E.
+
+:direction:
+    Specifies the direction of search (from the given start page):
+    1 for forward, or -1 for backward search. The search does not
+    wrap-around when reaching the last or first page respectively.
 
 :regexp:
     This boolean must be set to True when the search pattern is a regular
@@ -1897,9 +1916,10 @@ Input Parameters:
     call of the function specified by *progress*. When not specified, the
     callback is invoked with a single parameter.
 
-**Note:** The page object is only valid while inside of the
-callback function (i.e. you must not assign the object to a
-variable outside of the scope of the handler function.)
+**Note:** The page object is only valid while inside of the callback
+function (i.e. you must not assign the object to a variable outside of the
+scope of the handler function.) An exception of type *ValueError* will be
+raised upon later access to an invalidated page.
 
 **Note:**
 In a multi-threaded application the data service decoder may receive
@@ -1959,36 +1979,36 @@ and double width and size characters count as one (reducing the
 line width) so one can find combinations of normal and enlarged
 characters.
 
-Zvbi.Search.next()
-------------------
+Zvbi.Search.__iternext__()
+--------------------------
+
+After creating an instance of *Zvbi.Search*, iteration is used to execute
+the search:
 
 ::
 
-    status = search.next([dir=1])
+    search = Zvbi.Search(decoder, pattern)
+    for pg in search:
+        # ... process pg object
 
-The function starts or continues the search on a previously created search
-context.  Parameter *dir* specifies the direction: 1 for forward, or -1
-for backward search.
+As long as matching pages are found, iteration returns a reference to the
+next match in form of an instance of `Zvbi.Page`_. The matching range of
+text is highlighted in the page.
 
-When a matching page is found, the function returns a reference to it in
-form of an instance of `Zvbi.Page`_. The matching range of text is
-highlighted in the page.
+**Note**: The returned page object refers to temporary memory within the C
+library; therefore the page content is no longer valid after continuation
+of the search or start of a new search. An exception of type *ValueError*
+will be raised upon access to an invalidated page.
 
-If no matching page is found, the function raises exception
-*StopIteration*. Upon other errors the function raises exception
-*Zvbi.SearchError* which contains a string describing the cause, which can
-be one of the following:
+If no matching page is found, iteration raises exception *StopIteration*
+as usual. The same exception is raised when the callback returned *False*.
+If iteration is continued after reaching its end, the search will restart
+from the starting point given in the constructor. After cancellation
+search will continue from the last visited page.
 
-VBI_SEARCH_ERROR:
-    Pattern not found. Another call of `Zvbi.Search.next()`_
-    will restart from the starting point given in the constructor.
-
-VBI_SEARCH_CACHE_EMPTY:
-    No pages in the cache.
-
-VBI_SEARCH_CANCELED:
-    The search has been canceled by the progress function.
-    Another call of *search.next()* continues from the last searched page.
+Upon other errors the function raises exception *Zvbi.SearchError*
+which contains a string describing the cause, which can be because the
+cache is completely empty, or internal errors.
 
 
 .. _Zvbi.Page:
@@ -2003,6 +2023,28 @@ important export modules described in `Zvbi.Export`_.
 All of the functions in this section work on page objects as returned
 by the page cache's "fetch" functions (see `Zvbi.ServiceDec`_)
 or the page search function (see `Zvbi.Search`_)
+
+Page objects returned by `Zvbi.ServiceDec`_'s "fetch" interfaces must be
+deleted for releasing resources which are locked internally in the library
+during the fetch. `Zvbi.Page`_ supports the Python's "Context Manager"
+protocol (i.e.  methods "__enter__" and "__exit__") to allow doing this
+easily using the "with" statement: ::
+
+    with vtdec.fetch_vt_page(pgno, subno) as pg:
+        # process object "pg"
+
+Any access to the page after the block defined by "with" would raise
+exception *ValueError*.
+
+Page objects returned by `Zvbi.Search`_ (or referenced as parameter to the
+progress callback function) have an implicitly limited life-time as they
+refer to internal static storage within the C library.  These objects are
+released invalidated automatically. Any access outside of their lifetime
+raises exception *ValueError*. In particular this means you must not
+assign such page objects to global variables. Instead just store the page
+number and fetch the page again from the cache via `Zvbi.ServiceDec`_ when
+needed.
+
 
 Zvbi.Page.draw_vt_page()
 ------------------------
@@ -2306,19 +2348,19 @@ Zvbi.Page.get_page_text()
 
 ::
 
-    txt = pg.get_page_text( [all_chars] )
+    txt = pg.get_page_text( replace_chr='' )
 
 The function returns the complete page text in form of a string (i.e.
 Unicode).  This function is very similar to *pg.print_page()*,
 but does not insert or remove any characters so that it's guaranteed
 that characters in the returned string correlate exactly with the
-array returned by *pg.get_page_text_properties()*.
+array returned by `Zvbi.Page.get_page_text_properties()`_.
 
-When the optional parameter *all_chars* is set to 1, even
-characters on the private Unicode code pages are included.
-Otherwise these are replaced with blanks. Note use of these
-characters will cause errors when passing the string to
-transcoder functions (such as Pythons's *decode()*.)
+The optional parameter can be set to a single-character string for
+replacing "private-use" Unicode code points in range [0xE000, 0xF8FF] with
+that character.  Note these code points are used for representing
+graphical characters. When not replacing them, there will be errors when
+passing the string to transcoder functions (such as Pythons's *decode()*.)
 
 Zvbi.Page.vbi_resolve_link()
 ----------------------------
@@ -2330,25 +2372,13 @@ Zvbi.Page.vbi_resolve_link()
 The page instance *pg* (in practice only Teletext pages) may contain
 hyperlinks such as HTTP URLs, e-mail addresses or links to other
 pages. Characters being part of a hyperlink have their "link" flag
-set in the character properties (see *pg.get_page_text_properties()*),
-this function returns a dict with a more verbose
-description of the link.
+set in the character properties (see
+`Zvbi.Page.get_page_text_properties()`_),
+this function returns a dict with a more verbose description of the link.
 
-The returned hash contains the following elements (depending on the
-type of the link not all elements may be present):
-
-* "type"
-* "eacem"
-* "name"
-* "url"
-* "script"
-* "nuid"
-* "pgno"
-* "subno"
-* "expires"
-* "itv_type"
-* "priority"
-* "autoload"
+The function returns an object of type *Zvbi.PageLink*. See chapter
+`Event handling`_, item *VBI_EVENT_TRIGGER* for a description of the
+contents.
 
 Zvbi.Page.vbi_resolve_home()
 ----------------------------
@@ -2359,8 +2389,11 @@ Zvbi.Page.vbi_resolve_home()
 
 All Teletext pages have a built-in home link, by default
 page 100, but can also be the magazine intro page or another
-page selected by the editor.  This function returns a dict
-with the same elements as *pg.vbi_resolve_link()*.
+page selected by the editor.
+
+The function returns an object of type *Zvbi.PageLink*. See chapter
+`Event handling`_, item *VBI_EVENT_TRIGGER* for a description of the
+contents.
 
 
 .. _Zvbi.Export:

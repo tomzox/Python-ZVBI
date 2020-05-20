@@ -345,8 +345,11 @@ def cap_frame():
         draw(raw_buf)
 
     except Zvbi.CaptureError as e:
-        if ("timeout" not in str(e)) and opt.ignore_error:
-            print("Capture error: %s" % e)
+        if not opt.ignore_error:
+            print("Capture error:", e, file=sys.stderr)
+    except Zvbi.CaptureTimeout:
+        if not opt.ignore_error:
+            print("Capture timeout", file=sys.stderr)
 
     tk.after(10, cap_frame)
 
@@ -393,7 +396,7 @@ def main_func():
         print(("Unexpected sampling format:%d\n" +
                "In raw decoder parameters: %s\n" +
                "Likely the device does not support capturing raw data")
-                % (par.sampling_format, str(par)))
+                % (par.sampling_format, str(par)), file=sys.stderr)
         sys.exit(1)
 
     src_w = par.bytes_per_line

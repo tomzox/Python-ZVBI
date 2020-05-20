@@ -107,8 +107,9 @@ def main_func():
                 print("ERROR multiplexing:", e, file=sys.stderr)
 
         except Zvbi.CaptureError as e:
-            if "timeout" not in str(e):
-                print("Capture error: %s" % e, file=sys.stderr)
+            print("Capture error:", e)
+        except Zvbi.CaptureTimeout:
+            pass
 
 
 def ParseCmdOptions():

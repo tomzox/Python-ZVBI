@@ -50,28 +50,27 @@ def ev_handler(pg_type, ev, user_data=None):
 
     # Fetching & exporting here is a bad idea,
     # but this is only a test.
-    page = vtdec.fetch_vt_page(ev.pgno, ev.subno)
+    with vtdec.fetch_vt_page(ev.pgno, ev.subno) as page:
+        try:
+            if export_pgno == -1:
+                name = ("test-%03x-%02x.%s" % (ev.pgno, ev.subno, extension))
+                ex.to_file(page, name)
+            else:
+                sys.stdout.flush()
+                fd = sys.stdout.fileno()
+                ex.to_stdio(page, fd)
 
-    try:
-        if export_pgno == -1:
-            name = ("test-%03x-%02x.%s" % (ev.pgno, ev.subno, extension))
-            ex.to_file(page, name)
-        else:
-            sys.stdout.flush()
-            fd = sys.stdout.fileno()
-            ex.to_stdio(page, fd)
+        except Zvbi.ExportError as e:
+            print("export failed:", e, file=sys.stderr)
+            sys.exit(-1)
 
-    except Zvbi.ExportError as e:
-        print("export failed:", e, file=sys.stderr)
-        sys.exit(-1)
+        str = ex.to_memory(page)
+        #print(str)
+        str = None
 
-    str = ex.to_memory(page)
-    #print(str)
-    str = None
-
-    if not export_pgno == -1:
-        print("done", file=sys.stderr)
-        quit = 1
+        if not export_pgno == -1:
+            print("done", file=sys.stderr)
+            quit = 1
 
 
 def pes_mainloop(dx):
@@ -118,8 +117,9 @@ def dev_mainloop():
             sliced_buf = cap.pull_sliced(10)
             vtdec.decode(sliced_buf)
         except Zvbi.CaptureError as e:
-            if "timeout" not in str(e):
-                print("Capture error: %s" % e, file=sys.stderr)
+            print("Capture error:", e)
+        except Zvbi.CaptureTimeout:
+            pass
 
     if not quit:
         print("\rEnd of stream, page %03x not found\n" % export_pgno, file=sys.stderr)

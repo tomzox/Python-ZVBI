@@ -49,7 +49,7 @@
 #error "Minimum version for libzvbi is 0.2." #ZVBI_XS_MIN_MICRO
 #endif
 
-PyObject * ZvbiError;
+static PyObject * ZvbiError;
 
 // ---------------------------------------------------------------------------
 

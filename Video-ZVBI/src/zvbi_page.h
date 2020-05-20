@@ -16,7 +16,8 @@
 
 extern PyTypeObject ZvbiPageTypeDef;
 
-PyObject * ZvbiPage_New(vbi_page * page, vbi_bool do_free_pg);
+PyObject * ZvbiPage_New(vbi_page * page);
+PyObject * ZvbiPage_NewTemporary(vbi_page * page, const int * validity_src);
 vbi_page * ZvbiPage_GetPageBuf(PyObject * obj);
 
 int PyInit_Page(PyObject * module, PyObject * error_base);

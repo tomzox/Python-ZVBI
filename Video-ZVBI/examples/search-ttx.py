@@ -54,19 +54,13 @@ def search(vtdec):
         srch = Zvbi.Search(vtdec, pat, casefold=False, regexp=False,
                            progress=progress, userdata=pat)
   
-        try:
-            while True:
-                pg = srch.next(True)
-
-                # match found
-                (pgno, subno) = pg.get_page_no()
-                if (last_pgno < 0) or (pgno != last_pgno) or (subno != last_subno):
-                    print("Found match: %03X.%04X\n" % (pgno, subno))
-                    print(pg.print_page(fmt='ascii').decode('utf-8'))
-                    last_pgno = pgno
-                    last_subno = subno
-        except StopIteration:
-            pass
+        for pg in srch:
+            (pgno, subno) = pg.get_page_no()
+            if (last_pgno < 0) or (pgno != last_pgno) or (subno != last_subno):
+                print("Found match: %03X.%04X\n" % (pgno, subno))
+                print(pg.print_page(fmt='ascii').decode('utf-8'))
+                last_pgno = pgno
+                last_subno = subno
 
         print("")
 
@@ -102,8 +96,9 @@ def main_func():
             sliced_buf = cap.pull_sliced(10)
             vtdec.decode(sliced_buf)
         except Zvbi.CaptureError as e:
-            if "timeout" not in str(e):
-                print("Capture error: %s" % e)
+            print("Capture error:", e)
+        except Zvbi.CaptureTimeout:
+            pass
 
 
 def ParseCmdOptions():

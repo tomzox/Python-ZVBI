@@ -33,7 +33,18 @@ typedef struct {
     unsigned services;
 } ZvbiCaptureObj;
 
-PyObject * ZvbiCaptureError;
+static PyObject * ZvbiCaptureError;
+static PyObject * ZvbiCaptureTimeout;
+
+/*
+ * This counter is used for limiting the life-time of capture buffer objects
+ * that refer to static storage in the libzvbi library. The object encapsulates
+ * a copy of the counter at the time of duration. The counter is incremented
+ * for any operation that invalidates the capture buffer content. Access to the
+ * object is rejected via exception when the counter no longer matches the
+ * object.
+ */
+static int ZvbiCapture_PulledBufferSeqNo;
 
 // ---------------------------------------------------------------------------
 
@@ -165,38 +176,36 @@ static PyObject *
 ZvbiCapture_read_raw(ZvbiCaptureObj *self, PyObject *args)
 {
     int timeout_ms = 0;
-    if (!PyArg_ParseTuple(args, "i", &timeout_ms)) {
-        return NULL;
-    }
     PyObject * RETVAL = NULL;
 
-    vbi_raw_decoder * p_par = vbi_capture_parameters(self->ctx);
-    if (p_par != NULL) {
-	size_t size_raw = (p_par->count[0] + p_par->count[1]) * p_par->bytes_per_line;
-        void * raw_buffer = PyMem_Malloc(size_raw);
+    if (PyArg_ParseTuple(args, "i", &timeout_ms)) {
+        vbi_raw_decoder * p_par = vbi_capture_parameters(self->ctx);
+        if (p_par != NULL) {
+            size_t size_raw = (p_par->count[0] + p_par->count[1]) * p_par->bytes_per_line;
+            void * raw_buffer = PyMem_Malloc(size_raw);
 
-        double timestamp = 0;
-        struct timeval tv;
-        tv.tv_sec  = timeout_ms / 1000;
-        tv.tv_usec = (timeout_ms % 1000) * 1000;
+            double timestamp = 0;
+            struct timeval tv;
+            tv.tv_sec  = timeout_ms / 1000;
+            tv.tv_usec = (timeout_ms % 1000) * 1000;
 
-        int st = vbi_capture_read_raw(self->ctx, raw_buffer, &timestamp, &tv);
-        if (st > 0) {
-            RETVAL = ZvbiCaptureRawBuf_FromData(raw_buffer, size_raw, timestamp);
-        }
-        else {
-            if (st < 0) {
-                PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
+            int st = vbi_capture_read_raw(self->ctx, raw_buffer, &timestamp, &tv);
+            if (st > 0) {
+                RETVAL = ZvbiCaptureRawBuf_FromData(raw_buffer, size_raw, timestamp);
             }
             else {
-                // FIXME use different exception
-                PyErr_SetString(ZvbiCaptureError, "timeout");
+                if (st < 0) {
+                    PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
+                }
+                else {
+                    PyErr_SetNone(ZvbiCaptureTimeout);
+                }
+                PyMem_Free(raw_buffer);
             }
-            PyMem_Free(raw_buffer);
         }
-    }
-    else {
-        PyErr_Format(ZvbiCaptureError, "capture error: invalid parameters");
+        else {
+            PyErr_Format(ZvbiCaptureError, "internal error: failed to query decoder parameters");
+        }
     }
     return RETVAL;
 }
@@ -205,39 +214,37 @@ static PyObject *
 ZvbiCapture_read_sliced(ZvbiCaptureObj *self, PyObject *args)
 {
     int timeout_ms = 0;
-    if (!PyArg_ParseTuple(args, "i", &timeout_ms)) {
-        return NULL;
-    }
     PyObject * RETVAL = NULL;
 
-    vbi_raw_decoder * p_par = vbi_capture_parameters(self->ctx);
-    if (p_par != NULL) {
-	size_t size_sliced = (p_par->count[0] + p_par->count[1]) * sizeof(vbi_sliced);
-        vbi_sliced * p_sliced = (vbi_sliced*) PyMem_Malloc(size_sliced);
+    if (PyArg_ParseTuple(args, "i", &timeout_ms)) {
+        vbi_raw_decoder * p_par = vbi_capture_parameters(self->ctx);
+        if (p_par != NULL) {
+            size_t size_sliced = (p_par->count[0] + p_par->count[1]) * sizeof(vbi_sliced);
+            vbi_sliced * p_sliced = (vbi_sliced*) PyMem_Malloc(size_sliced);
 
-        int n_lines = 0;
-        double timestamp = 0;
-        struct timeval tv;
-        tv.tv_sec  = timeout_ms / 1000;
-        tv.tv_usec = (timeout_ms % 1000) * 1000;
+            int n_lines = 0;
+            double timestamp = 0;
+            struct timeval tv;
+            tv.tv_sec  = timeout_ms / 1000;
+            tv.tv_usec = (timeout_ms % 1000) * 1000;
 
-        int st = vbi_capture_read_sliced(self->ctx, p_sliced, &n_lines, &timestamp, &tv);
-        if (st > 0) {
-            RETVAL = ZvbiCaptureSlicedBuf_FromData(p_sliced, n_lines, timestamp);
-        }
-        else {
-            if (st < 0) {
-                PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
+            int st = vbi_capture_read_sliced(self->ctx, p_sliced, &n_lines, &timestamp, &tv);
+            if (st > 0) {
+                RETVAL = ZvbiCaptureSlicedBuf_FromData(p_sliced, n_lines, timestamp);
             }
             else {
-                // FIXME use different exception
-                PyErr_SetString(ZvbiCaptureError, "timeout");
+                if (st < 0) {
+                    PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
+                }
+                else {
+                    PyErr_SetNone(ZvbiCaptureTimeout);
+                }
+                PyMem_Free(p_sliced);
             }
-            PyMem_Free(p_sliced);
         }
-    }
-    else {
-        PyErr_Format(ZvbiCaptureError, "capture error: invalid parameters");
+        else {
+            PyErr_Format(ZvbiCaptureError, "internal error: failed to query decoder parameters");
+        }
     }
     return RETVAL;
 }
@@ -246,50 +253,48 @@ static PyObject *
 ZvbiCapture_read(ZvbiCaptureObj *self, PyObject *args)
 {
     int timeout_ms = 0;
-    if (!PyArg_ParseTuple(args, "i", &timeout_ms)) {
-        return NULL;
-    }
     PyObject * RETVAL = NULL;
 
-    vbi_raw_decoder * p_par = vbi_capture_parameters(self->ctx);
-    if (p_par != NULL) {
-	size_t size_sliced = (p_par->count[0] + p_par->count[1]) * sizeof(vbi_sliced);
-	size_t size_raw = (p_par->count[0] + p_par->count[1]) * p_par->bytes_per_line;
-        void * raw_buffer = PyMem_Malloc(size_raw);
-        vbi_sliced * p_sliced = (vbi_sliced*) PyMem_Malloc(size_sliced);
+    if (PyArg_ParseTuple(args, "i", &timeout_ms)) {
+        vbi_raw_decoder * p_par = vbi_capture_parameters(self->ctx);
+        if (p_par != NULL) {
+            size_t size_sliced = (p_par->count[0] + p_par->count[1]) * sizeof(vbi_sliced);
+            size_t size_raw = (p_par->count[0] + p_par->count[1]) * p_par->bytes_per_line;
+            void * raw_buffer = PyMem_Malloc(size_raw);
+            vbi_sliced * p_sliced = (vbi_sliced*) PyMem_Malloc(size_sliced);
 
-        int n_lines = 0;
-        double timestamp = 0;
-        struct timeval tv;
-        tv.tv_sec  = timeout_ms / 1000;
-        tv.tv_usec = (timeout_ms % 1000) * 1000;
+            int n_lines = 0;
+            double timestamp = 0;
+            struct timeval tv;
+            tv.tv_sec  = timeout_ms / 1000;
+            tv.tv_usec = (timeout_ms % 1000) * 1000;
 
-        int st = vbi_capture_read(self->ctx, raw_buffer, p_sliced, &n_lines, &timestamp, &tv);
-        if (st > 0) {
-            RETVAL = PyTuple_New(2);
-            if (RETVAL) {
-                PyTuple_SetItem(RETVAL, 0, ZvbiCaptureRawBuf_FromData(raw_buffer, size_raw, timestamp));
-                PyTuple_SetItem(RETVAL, 1, ZvbiCaptureSlicedBuf_FromData(p_sliced, n_lines, timestamp));
+            int st = vbi_capture_read(self->ctx, raw_buffer, p_sliced, &n_lines, &timestamp, &tv);
+            if (st > 0) {
+                RETVAL = PyTuple_New(2);
+                if (RETVAL) {
+                    PyTuple_SetItem(RETVAL, 0, ZvbiCaptureRawBuf_FromData(raw_buffer, size_raw, timestamp));
+                    PyTuple_SetItem(RETVAL, 1, ZvbiCaptureSlicedBuf_FromData(p_sliced, n_lines, timestamp));
+                }
+                else {
+                    PyMem_Free(raw_buffer);
+                    PyMem_Free(p_sliced);
+                }
             }
             else {
+                if (st < 0) {
+                    PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
+                }
+                else {
+                    PyErr_SetNone(ZvbiCaptureTimeout);
+                }
                 PyMem_Free(raw_buffer);
                 PyMem_Free(p_sliced);
             }
         }
         else {
-            if (st < 0) {
-                PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
-            }
-            else {
-                // FIXME use different exception
-                PyErr_SetString(ZvbiCaptureError, "timeout");
-            }
-            PyMem_Free(raw_buffer);
-            PyMem_Free(p_sliced);
+            PyErr_Format(ZvbiCaptureError, "internal error: failed to query decoder parameters");
         }
-    }
-    else {
-        PyErr_Format(ZvbiCaptureError, "capture error: invalid parameters");
     }
     return RETVAL;
 }
@@ -298,28 +303,29 @@ static PyObject *
 ZvbiCapture_pull_raw(ZvbiCaptureObj *self, PyObject *args)
 {
     int timeout_ms = 0;
-    if (!PyArg_ParseTuple(args, "i", &timeout_ms)) {
-        return NULL;
-    }
-
     PyObject * RETVAL = NULL;
-    vbi_capture_buffer * raw_buffer = NULL;
 
-    struct timeval tv;
-    tv.tv_sec  = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    if (PyArg_ParseTuple(args, "i", &timeout_ms)) {
+        vbi_capture_buffer * raw_buffer = NULL;
 
-    int st = vbi_capture_pull_raw(self->ctx, &raw_buffer, &tv);
-    if (st > 0) {
-        RETVAL = ZvbiCaptureRawBuf_FromPtr(raw_buffer);
-    }
-    else {
-        if (st < 0) {
-            PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
+        // invalidate previously returned capture buffer wrapper objects
+        ZvbiCapture_PulledBufferSeqNo++;
+
+        struct timeval tv;
+        tv.tv_sec  = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+        int st = vbi_capture_pull_raw(self->ctx, &raw_buffer, &tv);
+        if (st > 0) {
+            RETVAL = ZvbiCaptureRawBuf_FromPtr(raw_buffer, &ZvbiCapture_PulledBufferSeqNo);
         }
         else {
-            // FIXME use different exception
-            PyErr_SetString(ZvbiCaptureError, "timeout");
+            if (st < 0) {
+                PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
+            }
+            else {
+                PyErr_SetNone(ZvbiCaptureTimeout);
+            }
         }
     }
     return RETVAL;
@@ -329,28 +335,29 @@ static PyObject *
 ZvbiCapture_pull_sliced(ZvbiCaptureObj *self, PyObject *args)
 {
     int timeout_ms = 0;
-    if (!PyArg_ParseTuple(args, "i", &timeout_ms)) {
-        return NULL;
-    }
-
     PyObject * RETVAL = NULL;
-    vbi_capture_buffer * sliced_buffer = NULL;
 
-    struct timeval tv;
-    tv.tv_sec  = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    if (PyArg_ParseTuple(args, "i", &timeout_ms)) {
+        vbi_capture_buffer * sliced_buffer = NULL;
 
-    int st = vbi_capture_pull_sliced(self->ctx, &sliced_buffer, &tv);
-    if (st > 0) {
-        RETVAL = ZvbiCaptureSlicedBuf_FromPtr(sliced_buffer);
-    }
-    else {
-        if (st < 0) {
-            PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
+        // invalidate previously returned capture buffer wrapper objects
+        ZvbiCapture_PulledBufferSeqNo++;
+
+        struct timeval tv;
+        tv.tv_sec  = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+        int st = vbi_capture_pull_sliced(self->ctx, &sliced_buffer, &tv);
+        if (st > 0) {
+            RETVAL = ZvbiCaptureSlicedBuf_FromPtr(sliced_buffer, &ZvbiCapture_PulledBufferSeqNo);
         }
         else {
-            // FIXME use different exception
-            PyErr_SetString(ZvbiCaptureError, "timeout");
+            if (st < 0) {
+                PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
+            }
+            else {
+                PyErr_SetNone(ZvbiCaptureTimeout);
+            }
         }
     }
     return RETVAL;
@@ -360,39 +367,40 @@ static PyObject *
 ZvbiCapture_pull(ZvbiCaptureObj *self, PyObject *args)
 {
     int timeout_ms = 0;
-    if (!PyArg_ParseTuple(args, "i", &timeout_ms)) {
-        return NULL;
-    }
-
     PyObject * RETVAL = NULL;
-    vbi_capture_buffer * raw_buffer = NULL;
-    vbi_capture_buffer * sliced_buffer = NULL;
 
-    struct timeval tv;
-    tv.tv_sec  = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    if (PyArg_ParseTuple(args, "i", &timeout_ms)) {
+        vbi_capture_buffer * raw_buffer = NULL;
+        vbi_capture_buffer * sliced_buffer = NULL;
 
-    int st = vbi_capture_pull(self->ctx, &raw_buffer, &sliced_buffer, &tv);
-    if (st > 0) {
-        RETVAL = PyTuple_New(2);
-        if (RETVAL) {
-            if (raw_buffer != NULL) {  // DVB devices may not return raw data
-                PyTuple_SetItem(RETVAL, 0, ZvbiCaptureRawBuf_FromPtr(raw_buffer));
+        // invalidate previously returned capture buffer wrapper objects
+        ZvbiCapture_PulledBufferSeqNo++;
+
+        struct timeval tv;
+        tv.tv_sec  = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+        int st = vbi_capture_pull(self->ctx, &raw_buffer, &sliced_buffer, &tv);
+        if (st > 0) {
+            RETVAL = PyTuple_New(2);
+            if (RETVAL) {
+                if (raw_buffer != NULL) {  // DVB devices may not return raw data
+                    PyTuple_SetItem(RETVAL, 0, ZvbiCaptureRawBuf_FromPtr(raw_buffer, &ZvbiCapture_PulledBufferSeqNo));
+                }
+                else {
+                    PyTuple_SetItem(RETVAL, 0, Py_None);
+                    Py_INCREF(Py_None);
+                }
+                PyTuple_SetItem(RETVAL, 1, ZvbiCaptureSlicedBuf_FromPtr(sliced_buffer, &ZvbiCapture_PulledBufferSeqNo));
             }
-            else {
-                PyTuple_SetItem(RETVAL, 0, Py_None);
-                Py_INCREF(Py_None);
-            }
-            PyTuple_SetItem(RETVAL, 1, ZvbiCaptureSlicedBuf_FromPtr(sliced_buffer));
-        }
-    }
-    else {
-        if (st < 0) {
-            PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
         }
         else {
-            // FIXME use different exception
-            PyErr_SetString(ZvbiCaptureError, "timeout");
+            if (st < 0) {
+                PyErr_Format(ZvbiCaptureError, "capture error (%s)", strerror(errno));
+            }
+            else {
+                PyErr_SetNone(ZvbiCaptureTimeout);
+            }
         }
     }
     return RETVAL;
@@ -523,10 +531,21 @@ int PyInit_Capture(PyObject * module, PyObject * error_base)
         return -1;
     }
 
-    // create exception class
+    // create exception classes
     ZvbiCaptureError = PyErr_NewException("Zvbi.CaptureError", error_base, NULL);
     Py_XINCREF(ZvbiCaptureError);
     if (PyModule_AddObject(module, "CaptureError", ZvbiCaptureError) < 0) {
+        Py_XDECREF(ZvbiCaptureError);
+        Py_CLEAR(ZvbiCaptureError);
+        Py_DECREF(module);
+        return -1;
+    }
+    // create exception class
+    ZvbiCaptureTimeout = PyErr_NewException("Zvbi.CaptureTimeout", error_base, NULL);
+    Py_XINCREF(ZvbiCaptureTimeout);
+    if (PyModule_AddObject(module, "CaptureTimeout", ZvbiCaptureTimeout) < 0) {
+        Py_XDECREF(ZvbiCaptureTimeout);
+        Py_CLEAR(ZvbiCaptureTimeout);
         Py_XDECREF(ZvbiCaptureError);
         Py_CLEAR(ZvbiCaptureError);
         Py_DECREF(module);
@@ -537,6 +556,8 @@ int PyInit_Capture(PyObject * module, PyObject * error_base)
     Py_INCREF(&ZvbiCaptureTypeDef);
     if (PyModule_AddObject(module, "Capture", (PyObject *) &ZvbiCaptureTypeDef) < 0) {
         Py_DECREF(&ZvbiCaptureTypeDef);
+        Py_XDECREF(ZvbiCaptureTimeout);
+        Py_CLEAR(ZvbiCaptureTimeout);
         Py_XDECREF(ZvbiCaptureError);
         Py_CLEAR(ZvbiCaptureError);
         return -1;

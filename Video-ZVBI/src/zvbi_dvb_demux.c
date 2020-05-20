@@ -55,6 +55,13 @@ typedef struct vbi_dvb_demux_obj_struct {
 
 static PyObject * ZvbiDvbDemuxError;
 
+/*
+ * This counter is used for limiting the life-time of capture buffer objects
+ * produced by the callback to the duration of the callback. Later access to
+ * the buffer will result in an exception.
+ */
+static int ZvbiDvbDemux_CaptureBufSeqNo;
+
 // ---------------------------------------------------------------------------
 
 /*
@@ -72,13 +79,15 @@ zvbi_xs_dvb_pes_handler( vbi_dvb_demux *        dx,
     vbi_bool result = FALSE; /* defaults to "failure" result */
 
     if ((self != NULL) && (self->demux_cb != NULL)) {
+        // invalidate previously returned capture buffer wrapper objects
+        ZvbiDvbDemux_CaptureBufSeqNo++;
+
         vbi_capture_buffer cap_buf;
         cap_buf.data = (void*)sliced;  /* cast removes "const" */
         cap_buf.size = sizeof(vbi_sliced) * sliced_lines;
         cap_buf.timestamp = PTS_TO_TIMESTAMP(pts);
 
-        // FIXME allocate from heap - safe in case of ref-cnt violation after call return
-        PyObject * sliced_obj = ZvbiCaptureSlicedBuf_FromPtr(&cap_buf);
+        PyObject * sliced_obj = ZvbiCaptureSlicedBuf_FromPtr(&cap_buf, &ZvbiDvbDemux_CaptureBufSeqNo);
         if (sliced_obj != NULL) {
             // invoke the Python subroutine
             PyObject * cb_rslt =
@@ -89,9 +98,11 @@ zvbi_xs_dvb_pes_handler( vbi_dvb_demux *        dx,
                 result = (PyObject_IsTrue(cb_rslt) == 1);
                 Py_DECREF(cb_rslt);
             }
-            // TODO croak if Py_REFCNT(sliced_obj) not one
             Py_DECREF(sliced_obj);
         }
+
+        // invalidate page wrapper object: life-time of buffer is duration of callback only
+        ZvbiDvbDemux_CaptureBufSeqNo++;
 
         // clear exceptions as we cannot handle them here
         if (PyErr_Occurred() != NULL) {

@@ -16,9 +16,9 @@
 
 vbi_capture_buffer * ZvbiCaptureBuf_GetBuf(PyObject * obj);
 
-PyObject * ZvbiCaptureRawBuf_FromPtr(vbi_capture_buffer * ptr);
+PyObject * ZvbiCaptureRawBuf_FromPtr(vbi_capture_buffer * ptr, const int * validity_src);
 PyObject * ZvbiCaptureRawBuf_FromData(char * data, int size, double timestamp);
-PyObject * ZvbiCaptureSlicedBuf_FromPtr(vbi_capture_buffer * ptr);
+PyObject * ZvbiCaptureSlicedBuf_FromPtr(vbi_capture_buffer * ptr, const int * validity_src);
 PyObject * ZvbiCaptureSlicedBuf_FromData(vbi_sliced * data, int n_lines, double timestamp);
 
 extern PyTypeObject ZvbiCaptureRawBufTypeDef;

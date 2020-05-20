@@ -30,15 +30,20 @@ typedef struct {
     vbi_decoder * ctx;
 } ZvbiServiceDecObj;
 
-PyObject * ZvbiServiceDecError;
+static PyObject * ZvbiServiceDecError;
 
 // ---------------------------------------------------------------------------
 
 vbi_decoder *
-ZvbiServiceDec_GetBuf(PyObject * self)
+ZvbiServiceDec_GetBuf(PyObject * obj)
 {
-    assert(PyObject_IsInstance(self, (PyObject*)&ZvbiServiceDecTypeDef) == 1);
-    return ((ZvbiServiceDecObj*) self)->ctx;
+    assert(PyObject_IsInstance(obj, (PyObject*)&ZvbiServiceDecTypeDef) == 1);
+    ZvbiServiceDecObj * self = (ZvbiServiceDecObj*) obj;
+
+    if (self->ctx == NULL) {
+        PyErr_SetString(PyExc_ValueError, "ServiceDec object is invalid");
+    }
+    return self->ctx;
 }
 
 static PyObject *
@@ -96,14 +101,14 @@ ZvbiServiceDec_decode(ZvbiServiceDecObj *self, PyObject *args)
         if ((sliced_buffer != NULL) && (sliced_buffer->data != NULL)) {
             vbi_sliced * p_sliced = sliced_buffer->data;
             int n_lines = sliced_buffer->size / sizeof(vbi_sliced);
-            // FIXME should be valid lines only
+            // note "size" of CaptureSlicedBuf is calculated from "n_lines" result of slicer
 
             vbi_decode(self->ctx, p_sliced, n_lines, sliced_buffer->timestamp);
             Py_INCREF(Py_None);
             RETVAL = Py_None;
         }
         else {
-            PyErr_SetString(ZvbiServiceDecError, "Sliced capture buffer contains no data");
+            PyErr_SetString(PyExc_ValueError, "Sliced capture buffer contains no data");
         }
     }
     return RETVAL;
@@ -124,7 +129,7 @@ ZvbiServiceDec_decode_bytes(ZvbiServiceDecObj *self, PyObject *args)
             RETVAL = Py_None;
         }
         else {
-            PyErr_SetString(ZvbiServiceDecError, "Buffer too short for given number of lines");
+            PyErr_SetString(PyExc_ValueError, "Buffer too short for given number of lines");
         }
         PyBuffer_Release(&in_buf);
     }
@@ -255,7 +260,7 @@ ZvbiServiceDec_fetch_vt_page(ZvbiServiceDecObj *self, PyObject *args, PyObject *
             if (vbi_fetch_vt_page(self->ctx, page, pgno, subno,
                                   max_level, display_rows, navigation))
             {
-                RETVAL = ZvbiPage_New(page, TRUE);
+                RETVAL = ZvbiPage_New(page);
             }
             else {
                 PyErr_SetString(ZvbiServiceDecError, "Failed to fetch page");
@@ -278,7 +283,7 @@ ZvbiServiceDec_fetch_cc_page(ZvbiServiceDecObj *self, PyObject *args, PyObject *
         vbi_page * page = PyMem_RawMalloc(sizeof(vbi_page));
         if (page != NULL) {
             if (vbi_fetch_cc_page(self->ctx, page, pgno, reset)) {
-                RETVAL = ZvbiPage_New(page, TRUE);
+                RETVAL = ZvbiPage_New(page);
             }
             else {
                 PyErr_SetString(ZvbiServiceDecError, "Failed to fetch page");

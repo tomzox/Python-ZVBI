@@ -64,8 +64,9 @@ def cap_frame():
         sliced_buf = cap.pull_sliced(10)
         vtdec.decode(sliced_buf)
     except Zvbi.CaptureError as e:
-        if "timeout" not in str(e):
-            print("Capture error: %s" % e)
+        print("Capture error:", e, file=sys.stderr)
+    except Zvbi.CaptureTimeout:
+        pass
 
     if redraw:
         pg_display()
@@ -166,7 +167,7 @@ def pg_display_text():
 
         (rows, columns) = pg.get_page_size()
         pal = pg.get_page_color_map()
-        text = pg.get_page_text()
+        text = pg.get_page_text(' ')
         prop = pg.get_page_text_properties()
 
         fh = tk.call("font", "metrics", font, "-linespace")
@@ -224,7 +225,6 @@ def pg_link(x, y):
                 fh = tk.call("font", "metrics", font, "-linespace")
                 fw = font.measure("0")
 
-            print("link X/X %d,%d" % (x//fw, y//fh))
             link = pg.resolve_link(x // fw, y // fh)
             if link.type == Zvbi.VBI_LINK_PAGE:
                 pg_sched = link.pgno
