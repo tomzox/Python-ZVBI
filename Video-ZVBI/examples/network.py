@@ -21,11 +21,15 @@
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #
 
-# Perl Id: network.pl,v 1.1 2007/11/18 18:48:35 tom Exp tom 
-# ZVBI #Id: network.c,v 1.2 2006/10/27 04:52:08 mschimek Exp #
-
-# This example shows how to identify a network from data transmitted
-# in XDS packets, Teletext packet 8/30 format 1 and 2, and VPS packets.
+# Description:
+#
+#   Example for the use of class Zvbi.ServiceDec, type
+#   Zvbi.VBI_EVENT_NETWORK. This script shows how to identify a network
+#   from data transmitted in XDS packets, Teletext packet 8/30 format 1
+#   and 2, and VPS packets. The script captures from a device until the
+#   currently tuned channel is identified by means of VPS, PDC et.al.
+#
+#   (This is a direct translation of examples/network.c in libzvbi.)
 
 import sys
 import argparse
@@ -112,13 +116,13 @@ def main_func():
                 Zvbi.VBI_SLICED_VPS |
                 Zvbi.VBI_SLICED_CAPTION_525)
 
-    if opt.v4l2:
+    if opt.v4l2 or (opt.pid == 0 and not "dvb" in opt.device):
         opt_buf_count = 5
         opt_strict = 0
-        cap = Zvbi.Capture(opt.device, services=services,
-                           buffers=opt_buf_count, strict=opt_strict, trace=opt.verbose)
+        cap = Zvbi.Capture.Analog(opt.device, services=services,
+                                  buffers=opt_buf_count, strict=opt_strict, trace=opt.verbose)
     else:
-        cap = Zvbi.Capture(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
+        cap = Zvbi.Capture.Dvb(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
 
     vtdec = Zvbi.ServiceDec()
     vtdec.event_handler_register( (Zvbi.VBI_EVENT_NETWORK |
@@ -128,16 +132,26 @@ def main_func():
 
 
 def ParseCmdOptions():
+    global opt
     parser = argparse.ArgumentParser(description='Capture and print network identification')
-    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0")
-    parser.add_argument("--pid", type=int, default=104)
-    parser.add_argument("--v4l2", action='store_true', default=False)
-    parser.add_argument("--vps", action='store_true', default=False)
-    parser.add_argument("--p8301", action='store_true', default=False)
-    parser.add_argument("--p8302", action='store_true', default=False)
-    parser.add_argument("--verbose", "-v", action='store_true', default=False)
-    return parser.parse_args()
+    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0", help="Path to video capture device")
+    parser.add_argument("--pid", type=int, default=0, help="VBI channel PID for DVB")
+    parser.add_argument("--v4l2", action='store_true', default=False, help="Using analog driver interface")
+    parser.add_argument("--vps", action='store_true', default=False, help="Use VPS only")
+    parser.add_argument("--p8301", action='store_true', default=False, help="Use packet 8/30/1 only")
+    parser.add_argument("--p8302", action='store_true', default=False, help="Use packet 8/30/2 only")
+    parser.add_argument("--verbose", action='store_true', default=False, help="Enable trace output in the library")
+    opt = parser.parse_args()
+
+    if opt.v4l2 and (opt.pid != 0):
+        print("Options --v4l2 and --pid are multually exclusive", file=sys.stderr)
+        sys.exit(1)
+    if not opt.v4l2 and (opt.pid == 0) and ("dvb" in opt.device):
+        print("WARNING: DVB devices require --pid parameter", file=sys.stderr)
 
 
-opt = ParseCmdOptions()
-main_func()
+try:
+    ParseCmdOptions()
+    main_func()
+except KeyboardInterrupt:
+    pass

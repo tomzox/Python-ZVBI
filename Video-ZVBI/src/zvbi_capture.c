@@ -63,12 +63,63 @@ ZvbiCapture_dealloc(ZvbiCaptureObj *self)
     Py_TYPE(self)->tp_free((PyObject *) self);
 }
 
-static int
-ZvbiCapture_init(ZvbiCaptureObj *self, PyObject *args, PyObject *kwds)
+static void
+ZvbiCapture_AppendErrorStr(char ** errorstr, const char * src, char * new_error)
+{
+    if (new_error != NULL) {
+        if (*errorstr) {
+            char * tmp = malloc(strlen(*errorstr) + strlen(src) + strlen(new_error) + 1+1);
+            sprintf(tmp, "%s\n%s%s", *errorstr, src, new_error);
+            free(*errorstr);
+            free(new_error);
+            *errorstr = tmp;
+        }
+        else {
+            char * tmp = malloc(strlen(src) + strlen(new_error) + 1);
+            sprintf(tmp, "%s%s", src, new_error);
+            free(new_error);
+            *errorstr = tmp;
+        }
+    }
+}
+
+static PyObject *
+ZvbiCapture_NewDvb(PyObject *null_self, PyObject *args, PyObject *kwds)
+{
+    static char * kwlist[] = {"dev", "dvb_pid", "trace", NULL};
+    char * dev_name = NULL;
+    unsigned dvb_pid = 0;
+    int trace = FALSE;
+    PyObject * RETVAL = NULL;
+
+    if (PyArg_ParseTupleAndKeywords(args, kwds, "s|II", kwlist,
+                                    &dev_name, &dvb_pid, &trace))
+    {
+        // note also works with default value 0 for PID (can be set later using dvb_filter)
+        char * errorstr = NULL;
+        vbi_capture * ctx = vbi_capture_dvb_new2(dev_name, dvb_pid, &errorstr, trace);
+
+        if (ctx != NULL) {
+            RETVAL = ZvbiCapture_new(&ZvbiCaptureTypeDef, NULL, NULL);
+            if (RETVAL != NULL) {
+                ((ZvbiCaptureObj*)RETVAL)->ctx = ctx;
+            }
+        }
+        else {
+            PyErr_SetString(ZvbiCaptureError, errorstr ? errorstr : "unknown error");
+        }
+        if (errorstr != NULL) {
+            free(errorstr);
+        }
+    }
+    return RETVAL;
+}
+
+static PyObject *
+ZvbiCapture_NewAnalog(PyObject *null_self, PyObject *args, PyObject *kwds)
 {
     static char * kwlist[] = {"dev",
                               "services",   // analog only
-                              "dvb_pid",
                               "buffers",    // v4l2 only
                               "scanning",   // v4l1+bkr only
                               //"dev_fd",   // sidecar only
@@ -78,74 +129,83 @@ ZvbiCapture_init(ZvbiCaptureObj *self, PyObject *args, PyObject *kwds)
                               NULL};
     char * dev_name = NULL;
     unsigned services = 0;
-    unsigned dvb_pid = 0;
     int buffers = 5;
     int scanning = 0;
     //int dev_fd = -1;
     PyObject * proxy = NULL;
     int strict = 0;
     int trace = FALSE;
+    PyObject * RETVAL = NULL;
 
-    // reset state in case the module is already initialized
-    if (self->ctx) {
-        vbi_capture_delete(self->ctx);
-        self->ctx = NULL;
-    }
-
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|$IIiiO!Ip", kwlist,
-                                     &dev_name, &services, &dvb_pid,
+    if (PyArg_ParseTupleAndKeywords(args, kwds, "sI|$iiO!Ip", kwlist,
+                                     &dev_name, &services,
                                      &buffers, &scanning, //&dev_fd,
                                      &ZvbiProxyTypeDef, &proxy,
                                      &strict, &trace))
     {
-        return -1;
-    }
+        char * errorstr = NULL;
+        vbi_capture * ctx = NULL;
+        // keep a copy as "services" parameter may be modified by constructors below
+        unsigned opt_services = services;
 
-    // parameter may be modified by constructor
-    self->services = services;
-    char * errorstr = NULL;
-    int RETVAL = 0;
-
-    if (proxy != NULL) {
-        // FIXME does not work for DVB
-        self->ctx = vbi_capture_proxy_new(ZvbiProxy_GetCtx(proxy), buffers, scanning, &self->services, strict, &errorstr);
-    }
+        if (proxy != NULL) {
+            services = opt_services;
+            ctx = vbi_capture_proxy_new(ZvbiProxy_GetCtx(proxy), buffers, scanning,
+                                        (services ? &services : NULL),
+                                        strict, &errorstr);
+        }
 #if 0  /* obsolete */
-    else if (dev_fd != -1) {
-        if (dvb_pid == 0) {
-            self->ctx = vbi_capture_v4l_sidecar_new(dev_name, dev_fd, &self->services, strict, &errorstr, trace);
+        else if (dev_fd != -1) {
+            services = opt_services;
+            ctx = vbi_capture_v4l_sidecar_new(dev_name, dev_fd,
+                                              (services ? &services : NULL),
+                                              strict, &errorstr, trace);
+        }
+#endif
+        else {
+            char * tmp_errorstr = NULL;
+            services = opt_services;
+            ctx = vbi_capture_v4l2_new(dev_name, buffers,
+                                       (services ?  &services : NULL),
+                                       strict, &tmp_errorstr, trace);
+            ZvbiCapture_AppendErrorStr(&errorstr, "V4L2 driver: ", tmp_errorstr);
+
+#if 0  /* obsolete */
+            if (ctx == NULL) {
+                tmp_errorstr = NULL;
+                services = opt_services;
+                ctx = vbi_capture_v4l_new(dev_name, scanning,
+                                          (services ?  &services : NULL),
+                                          strict, &tmp_errorstr, trace);
+                ZvbiCapture_AppendErrorStr(&errorstr, "V4L1 driver: ", tmp_errorstr);
+            }
+#endif
+            if (ctx == NULL) {
+                tmp_errorstr = NULL;
+                services = opt_services;
+                if (services != 0) {
+                    ctx = vbi_capture_bktr_new(dev_name, scanning, &services, strict, &tmp_errorstr, trace);
+                    ZvbiCapture_AppendErrorStr(&errorstr, "BSD bktr driver: ", tmp_errorstr);
+                }
+                else {
+                    ZvbiCapture_AppendErrorStr(&errorstr, "BSD bktr driver: ",
+                                               strdup("Zero for parameter service not supported"));
+                }
+            }
+        }
+        if (ctx != NULL) {
+            RETVAL = ZvbiCapture_new(&ZvbiCaptureTypeDef, NULL, NULL);
+            if (RETVAL != NULL) {
+                ((ZvbiCaptureObj*)RETVAL)->ctx = ctx;
+                ((ZvbiCaptureObj*)RETVAL)->services = services;
+            }
         }
         else {
-            errorstr = strdup("Invalid combination of option dvb_pid with dev_fd");
+            PyErr_SetString(ZvbiCaptureError, errorstr ? errorstr : "unknown error");
         }
-    }
-#endif
-    else {
-        // FIXME V4L2 must be done first as DVB open also works on V4L2 device but not vice-versa
-        self->ctx = vbi_capture_v4l2_new(dev_name, buffers, &self->services, strict, &errorstr, trace);
-
-#if 0  /* obsolete */
-        if (self->ctx == NULL) {
-            self->ctx = vbi_capture_v4l_new(dev_name, scanning, &self->services, strict, &errorstr, trace);
+        if (errorstr != NULL) {
+            free(errorstr);
         }
-#endif
-        if (self->ctx == NULL) {
-            // FIXME free errorstr if not NULL, or concatenate
-            self->ctx = vbi_capture_bktr_new(dev_name, scanning, &self->services, strict, &errorstr, trace);
-        }
-        if (self->ctx == NULL) {
-            // note also works with default value 0 for PID (can be set later using dvb_filter)
-            // FIXME free errorstr if not NULL, or concatenate
-            self->ctx = vbi_capture_dvb_new2(dev_name, dvb_pid, &errorstr, trace);
-        }
-
-    }
-    if (self->ctx == NULL) {
-        PyErr_SetString(ZvbiCaptureError, errorstr ? errorstr : "unknown error");
-        RETVAL = -1;
-    }
-    if (errorstr != NULL) {
-        free(errorstr);
     }
     return RETVAL;
 }
@@ -482,6 +542,10 @@ ZvbiCapture_get_fd_flags(ZvbiCaptureObj *self, PyObject *args)
 
 static PyMethodDef ZvbiCapture_MethodsDef[] =
 {
+    // static factory methods
+    {"Dvb",             (PyCFunction) ZvbiCapture_NewDvb,          METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL },
+    {"Analog",          (PyCFunction) ZvbiCapture_NewAnalog,       METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL },
+
     {"dvb_filter",      (PyCFunction) ZvbiCapture_dvb_filter,      METH_VARARGS, NULL },
     {"dvb_last_pts",    (PyCFunction) ZvbiCapture_dvb_last_pts,    METH_NOARGS,  NULL },
 
@@ -511,8 +575,8 @@ PyTypeObject ZvbiCaptureTypeDef =
     .tp_basicsize = sizeof(ZvbiCaptureObj),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
-    .tp_new = ZvbiCapture_new,
-    .tp_init = (initproc) ZvbiCapture_init,
+    //.tp_new = ZvbiCapture_new,  // instantation via factory methods only
+    //.tp_init = (initproc) ZvbiCapture_init,
     .tp_dealloc = (destructor) ZvbiCapture_dealloc,
     //.tp_repr = (PyObject * (*)(PyObject*)) ZvbiCapture_Repr,
     .tp_methods = ZvbiCapture_MethodsDef,

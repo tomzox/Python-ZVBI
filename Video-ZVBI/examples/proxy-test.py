@@ -20,17 +20,13 @@
 #
 #  Description:
 #
-#    This is a small demo application for the VBI proxy and libzvbi.
-#    It will read VBI data from the device given on the command line
-#    and dump requested services' data to standard output.  See below
-#    for a list of possible options.
+#   Example for the use of class Zvbi.Proxy. The script can capture either
+#   from a proxy daemon or a local device and dumps captured data on the
+#   terminal. Also allows changing services and channels during capturing
+#   (e.g. by entering "+ttx" or "-ttx" on stdin.) Start with option -help
+#   for a list of supported command line options.
 #
-#    This Python script has been translated from a Perl script that
-#    has been translated from proxy-test.c which is located in the
-#    test directory of the libzvbi package.
-#
-#  Perl #Id: proxy-test.pl,v 1.1 2007/11/18 18:48:35 tom Exp tom #
-#
+#   (This is a direct translation of test/proxy-test.c in libzvbi.)
 
 import sys
 import argparse
@@ -272,90 +268,10 @@ def read_service_string():
    return services
 
 
-# ---------------------------------------------------------------------------
-# Parse command line options
-#
-def ParseCmdOptions():
-   global opt
-   global opt_scanning
-   global opt_services
-
-   usage = (("%s [ Options ] service ...\n" % sys.argv[0]) +
-            "Supported services         : ttx | vps | wss | cc | raw | null\n"+
-            "Supported options:\n"+
-            "       -dev <path>         : device path\n"+
-            "       -api <type>         : v4l API: proxy|v4l2|v4l\n"+
-            "       -strict <level>     : service strictness level: 0..2\n"+
-            "       -norm PAL|NTSC      : specify video norm as PAL or NTSC\n"+
-            "       -vinput <index>     : switch video input source\n"+
-            "       -freq <kHz * 16>    : switch TV tuner frequency\n"+
-            "       -chnprio <1..3>     : channel switch priority\n"+
-            "       -subprio <0..4>     : background scheduling priority\n"+
-            "       -debug <level>      : enable debug output: 1=warnings, 2=all\n"+
-            "       -help               : this message\n"+
-            "You can also type service requests to stdin at runtime:\n"+
-            "Format: [\"+\"|\"-\"|\"=\"]<service>, e.g. \"+vps -ttx\" or \"=wss\"\n")
-
-   parser = argparse.ArgumentParser(description="Test of proxy client", usage=usage)
-   parser.add_argument("--device", type=str, default="/dev/vbi0", help="device path")
-   parser.add_argument("--api", type=str, default="proxy", help="v4l API: proxy|v4l2|v4l")
-   parser.add_argument("--strict", type=int, default=0, help="service strictness level: 0..2")
-   parser.add_argument("--norm", type=str, default="", help="specify video norm as PAL or NTSC")
-   parser.add_argument("--vinput", type=int, default=-1, help="switch video input source")
-   parser.add_argument("--freq", type=int, default=-1, help="switch TV tuner frequency (unit: kHz*16)")
-   parser.add_argument("--chnprio", type=int, default=Zvbi.VBI_CHN_PRIO_INTERACTIVE, help="channel switch priority 1..3")
-   parser.add_argument("--subprio", type=int, default=0, help="background scheduling priority 0..4")
-   parser.add_argument("--debug", type=int, default=0, dest="debug_level", help="control debug output: 0=none, 1=warnings, 2=all")
-
-   parser.add_argument("srv_lbl", nargs='*', help="services: ttx | vps | wss | cc | raw | null")
-   opt = parser.parse_args()
-
-   have_service = False
-   opt_services = 0
-   for srv in opt.srv_lbl:
-      if srv == 'ttx' or srv == 'teletext':
-         opt_services |= Zvbi.VBI_SLICED_TELETEXT_B | Zvbi.VBI_SLICED_TELETEXT_BD_525
-         have_service = True
-      elif srv == 'vps':
-         opt_services |= Zvbi.VBI_SLICED_VPS
-         have_service = True
-      elif srv == 'wss':
-         opt_services |= Zvbi.VBI_SLICED_WSS_625 | Zvbi.VBI_SLICED_WSS_CPR1204
-         have_service = True
-      elif srv == 'cc' or srv == 'caption':
-         opt_services |= Zvbi.VBI_SLICED_CAPTION_625 | Zvbi.VBI_SLICED_CAPTION_525
-         have_service = True
-      elif srv == 'raw':
-         opt_services |= Zvbi.VBI_SLICED_VBI_625 | Zvbi.VBI_SLICED_VBI_525
-         have_service = True
-      elif srv == 'null':
-         have_service = True
-
-   if not have_service:
-      print("no service given - Must specify at least one service (may be 'null')", file=sys.stderr)
-      sys.exit(1)
-
-   if not (opt.api == "proxy" or opt.api == "v4l2"):
-      print("Unknown API:", opt.api, "\n", usage, file=sys.stderr)
-      exit(1)
-
-   if opt.norm == "PAL":
-      opt_scanning = 625
-   elif opt.norm == "NTSC":
-      opt_scanning = 525
-   elif not opt.norm == "":
-      print("Unknown video norm:", opt.norm, "\n", usage, file=sys.stderr)
-      exit(1)
-
-   if opt.strict < 0 or opt.strict > 2:
-      print("Invalid strictness level:", opt.strict, "\n", usage, file=sys.stderr)
-      exit(1)
-
-
 # ----------------------------------------------------------------------------
-# Main entry point
+# Main loop
 #
-def main():
+def main_func():
    global proxy
    global cap
    global update_services
@@ -372,13 +288,13 @@ def main():
    cap = None
    try:
       if opt.api == 'v4l2':
-         cap = Zvbi.Capture(opt.device, services=cur_services, scanning=opt_scanning,
+         cap = Zvbi.Capture.Analog(opt.device, services=cur_services, scanning=opt_scanning,
                             buffers=opt_buf_count, strict=opt.strict, trace=opt.debug_level)
       else:
          proxy = Zvbi.Proxy(opt.device, "proxy-test", trace=opt.debug_level)
-         cap = Zvbi.Capture(opt.device, services=opt_services, scanning=opt_scanning,
-                            buffers=opt_buf_count, strict=opt.strict, trace=opt.debug_level,
-                            proxy=proxy)
+         cap = Zvbi.Capture.Analog(opt.device, services=opt_services, scanning=opt_scanning,
+                                   buffers=opt_buf_count, strict=opt.strict, trace=opt.debug_level,
+                                   proxy=proxy)
          proxy.set_callback(ProxyEventCallback)
 
       last_line_count = -1
@@ -507,8 +423,94 @@ def main():
    if proxy:
       del proxy
 
+# ---------------------------------------------------------------------------
+# Parse command line options
+#
+def ParseCmdOptions():
+   global opt
+   global opt_scanning
+   global opt_services
+
+   usage = (("%s [ Options ] service ...\n" % sys.argv[0]) +
+            "Supported services         : ttx | vps | wss | cc | raw | null\n"+
+            "Supported options:\n"+
+            "       -dev <path>         : device path\n"+
+            "       -api <type>         : v4l API: proxy|v4l2|v4l\n"+
+            "       -strict <level>     : service strictness level: 0..2\n"+
+            "       -norm PAL|NTSC      : specify video norm as PAL or NTSC\n"+
+            "       -vinput <index>     : switch video input source\n"+
+            "       -freq <kHz * 16>    : switch TV tuner frequency\n"+
+            "       -chnprio <1..3>     : channel switch priority\n"+
+            "       -subprio <0..4>     : background scheduling priority\n"+
+            "       -debug <level>      : enable debug output: 1=warnings, 2=all\n"+
+            "       -help               : this message\n"+
+            "You can also type service requests to stdin at runtime:\n"+
+            "Format: [\"+\"|\"-\"|\"=\"]<service>, e.g. \"+vps -ttx\" or \"=wss\"\n")
+
+   parser = argparse.ArgumentParser(description="Test of proxy client", usage=usage)
+   parser.add_argument("--device", type=str, default="/dev/vbi0", help="Path to VBI capture device (analog only)")
+   parser.add_argument("--api", type=str, default="proxy", help="interface to use: proxy|v4l2")
+   parser.add_argument("--strict", type=int, default=0, help="service strictness level: 0..2")
+   parser.add_argument("--norm", type=str, default="", help="specify video norm as PAL or NTSC")
+   parser.add_argument("--vinput", type=int, default=-1, help="switch video input source")
+   parser.add_argument("--freq", type=int, default=-1, help="switch TV tuner frequency (unit: kHz*16)")
+   parser.add_argument("--chnprio", type=int, default=Zvbi.VBI_CHN_PRIO_INTERACTIVE, help="channel switch priority 1..3")
+   parser.add_argument("--subprio", type=int, default=0, help="background scheduling priority 0..4")
+   parser.add_argument("--debug", type=int, default=0, dest="debug_level", help="control debug output: 0=none, 1=warnings, 2=all")
+
+   parser.add_argument("srv_lbl", nargs='*', help="services: ttx | vps | wss | cc | raw | null")
+   opt = parser.parse_args()
+
+   have_service = False
+   opt_services = 0
+   for srv in opt.srv_lbl:
+      if srv == 'ttx' or srv == 'teletext':
+         opt_services |= Zvbi.VBI_SLICED_TELETEXT_B | Zvbi.VBI_SLICED_TELETEXT_BD_525
+         have_service = True
+      elif srv == 'vps':
+         opt_services |= Zvbi.VBI_SLICED_VPS
+         have_service = True
+      elif srv == 'wss':
+         opt_services |= Zvbi.VBI_SLICED_WSS_625 | Zvbi.VBI_SLICED_WSS_CPR1204
+         have_service = True
+      elif srv == 'cc' or srv == 'caption':
+         opt_services |= Zvbi.VBI_SLICED_CAPTION_625 | Zvbi.VBI_SLICED_CAPTION_525
+         have_service = True
+      elif srv == 'raw':
+         opt_services |= Zvbi.VBI_SLICED_VBI_625 | Zvbi.VBI_SLICED_VBI_525
+         have_service = True
+      elif srv == 'null':
+         have_service = True
+
+   if not have_service:
+      print("no service given - Must specify at least one service (may be 'null')", file=sys.stderr)
+      sys.exit(1)
+
+   if not (opt.api == "proxy" or opt.api == "v4l2"):
+      print("Unknown API:", opt.api, "\n", usage, file=sys.stderr)
+      exit(1)
+
+   if opt.norm == "PAL":
+      opt_scanning = 625
+   elif opt.norm == "NTSC":
+      opt_scanning = 525
+   elif not opt.norm == "":
+      print("Unknown video norm:", opt.norm, "\n", usage, file=sys.stderr)
+      exit(1)
+
+   if opt.strict < 0 or opt.strict > 2:
+      print("Invalid strictness level:", opt.strict, "\n", usage, file=sys.stderr)
+      exit(1)
+
+   if "dvb" in opt.device:
+      print("WARNING: DVB devices are not supported by proxy", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# main
+
 try:
    ParseCmdOptions()
-   main()
+   main_func()
 except KeyboardInterrupt:
    pass

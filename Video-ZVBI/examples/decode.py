@@ -22,8 +22,15 @@
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #/
 
-# Perl #Id: decode.pl,v 1.1 2007/11/18 18:48:35 tom Exp tom #
-# libzvbi #Id: decode.c,v 1.19 2006/10/06 19:23:15 mschimek Exp #
+# Description:
+#
+#   Example for the use of class Zvbi.ServiceDec. Decodes sliced VBI data
+#   on stdin for different data services. Example for decoding teletext:
+#
+#     ./capture.py --sliced | ./decode.py --ttx
+#
+#   Call with option --help for a list of options.
+#   (This is a direct translation of test/decode.c in the libzvbi package.)
 
 import sys
 import argparse
@@ -777,40 +784,6 @@ def ttx_pgno(val_str):
     return val
 
 
-def ParseCmdOptions():
-    global opt
-    desc = "ZVBI decoding examples\n" + \
-           "Copyright (C) 2004, 2006 Michael H. Schimek\n" + \
-           "This program is licensed under GPL 2 or later. NO WARRANTIES."
-    parser = argparse.ArgumentParser(description=desc)
-    # Input options:
-    parser.add_argument("--pes", action='store_true', default=False, dest="source_is_pes", help="Source is a DVB PES stream [auto-detected]") # ATSC/DVB
-    # Decoding options:
-    parser.add_argument("--8301", action='store_true', default=False, dest="decode_8301", help="Teletext packet 8/30 format 1 (local time)")
-    parser.add_argument("--8302", action='store_true', default=False, dest="decode_8302", help="Teletext packet 8/30 format 2 (PDC)")
-    parser.add_argument("--all", action='store_true', default=False, dest="all", help="Enable ttx,8301,8302,cc,idl,vps,wssxds,pfc")
-    parser.add_argument("--cc", action='store_true', default=False, dest="decode_caption", help="Closed Caption")
-    parser.add_argument("--idl", action='store_true', default=False, dest="decode_idl", help="Any Teletext IDL packets (M/30, M/31)")
-    parser.add_argument("--idl-ch", type=int, default=0, dest="idl_channel", help="Decode Teletext IDL format A data from channel N")
-    parser.add_argument("--idl-addr", type=int, default=0, dest="idl_address", help="Decode Teletext IDL format A data from address NNN")
-    parser.add_argument("--pfc-pgno", type=ttx_pgno, default=0, dest="pfc_pgno", help="Decode Teletext Page Function Clear data from page NNN (e.g. 1DF)")
-    parser.add_argument("--pfc-stream", type=int, default=0, dest="pfc_stream", help="Decode Teletext Page Function Clear data from stream NN")
-    parser.add_argument("--vps", action='store_true', default=False, dest="decode_vps", help="Decode VPS data unrelated to PDC")
-    parser.add_argument("--vps-other", action='store_true', default=False, dest="decode_vps_other", help="Decode VPS data unrelated to PDC")
-    parser.add_argument("--ttx", action='store_true', default=False, dest="decode_ttx", help="Decode any Teletext packet")
-    parser.add_argument("--wss", action='store_true', default=False, dest="decode_wss", help="Wide Screen Signalling")
-    parser.add_argument("--xds", action='store_true', default=False, dest="decode_xds", help="Decode eXtended Data Service (NTSC line 284)")
-    # Modifying options:
-    parser.add_argument("--hex", action='store_true', default=False, dest="dump_hex", help="With -t dump packets in hex and ASCII, otherwise only ASCII")
-    parser.add_argument("--network", action='store_true', default=False, dest="dump_network", help="With -1, -2, -v decode CNI and print available information about the network")
-    parser.add_argument("--bin", action='store_true', default=False, dest="dump_bin", help="With -t, -p, -v dump data in binary format instead of ASCII")
-    parser.add_argument("--time", action='store_true', default=False, dest="dump_time", help="Dump capture timestamps")
-    # misc
-    parser.add_argument("--verbose", action='store_true', default=False)
-    parser.add_argument("--version", action='store_true', default=False, dest="version", help="Print the program version and exit")
-    opt = parser.parse_args()
-
-
 def main_func():
     global pfc
     global idl
@@ -869,6 +842,41 @@ def main_func():
         #open_sliced_read(infile)
 #endif
         old_mainloop()
+
+
+def ParseCmdOptions():
+    global opt
+    desc = "ZVBI decoding examples\n" + \
+           "Copyright (C) 2004, 2006 Michael H. Schimek\n" + \
+           "This program is licensed under GPL 2 or later. NO WARRANTIES."
+    parser = argparse.ArgumentParser(description=desc)
+    # Input options:
+    parser.add_argument("--pes", action='store_true', default=False, dest="source_is_pes", help="Source is a DVB PES stream [auto-detected]") # ATSC/DVB
+    # Decoding options:
+    parser.add_argument("--8301", action='store_true', default=False, dest="decode_8301", help="Teletext packet 8/30 format 1 (local time)")
+    parser.add_argument("--8302", action='store_true', default=False, dest="decode_8302", help="Teletext packet 8/30 format 2 (PDC)")
+    parser.add_argument("--all", action='store_true', default=False, dest="all", help="Enable ttx,8301,8302,cc,idl,vps,wssxds,pfc")
+    parser.add_argument("--cc", action='store_true', default=False, dest="decode_caption", help="Closed Caption")
+    parser.add_argument("--idl", action='store_true', default=False, dest="decode_idl", help="Any Teletext IDL packets (M/30, M/31)")
+    parser.add_argument("--idl-ch", type=int, default=0, dest="idl_channel", help="Decode Teletext IDL format A data from channel N")
+    parser.add_argument("--idl-addr", type=int, default=0, dest="idl_address", help="Decode Teletext IDL format A data from address NNN")
+    parser.add_argument("--pfc-pgno", type=ttx_pgno, default=0, dest="pfc_pgno", help="Decode Teletext Page Function Clear data from page NNN (e.g. 1DF)")
+    parser.add_argument("--pfc-stream", type=int, default=0, dest="pfc_stream", help="Decode Teletext Page Function Clear data from stream NN")
+    parser.add_argument("--vps", action='store_true', default=False, dest="decode_vps", help="Decode VPS data unrelated to PDC")
+    parser.add_argument("--vps-other", action='store_true', default=False, dest="decode_vps_other", help="Decode VPS data unrelated to PDC")
+    parser.add_argument("--ttx", action='store_true', default=False, dest="decode_ttx", help="Decode any Teletext packet")
+    parser.add_argument("--wss", action='store_true', default=False, dest="decode_wss", help="Wide Screen Signalling")
+    parser.add_argument("--xds", action='store_true', default=False, dest="decode_xds", help="Decode eXtended Data Service (NTSC line 284)")
+    # Modifying options:
+    parser.add_argument("--hex", action='store_true', default=False, dest="dump_hex", help="With -t dump packets in hex and ASCII, otherwise only ASCII")
+    parser.add_argument("--network", action='store_true', default=False, dest="dump_network", help="With -1, -2, -v decode CNI and print available information about the network")
+    parser.add_argument("--bin", action='store_true', default=False, dest="dump_bin", help="With -t, -p, -v dump data in binary format instead of ASCII")
+    parser.add_argument("--time", action='store_true', default=False, dest="dump_time", help="Dump capture timestamps")
+    # misc
+    parser.add_argument("--verbose", action='store_true', default=False, help="Enable trace in VBI library")
+    parser.add_argument("--version", action='store_true', default=False, dest="version", help="Print the program version and exit")
+    opt = parser.parse_args()
+
 
 
 try:

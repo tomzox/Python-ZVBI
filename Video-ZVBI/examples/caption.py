@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #
-#  libzvbi test
+#  Rudimentary render code for Closed Caption (CC) test.
 #
 #  Copyright (C) 2000, 2001 Michael H. Schimek
 #  Perl Port: Copyright (C) 2007 Tom Zoerner
@@ -21,18 +21,28 @@
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #
 
-# Perl #Id: caption.pl,v 1.1 2007/11/18 18:48:35 tom Exp tom #
-# ZVBI #Id: caption.c,v 1.14 2006/05/22 08:57:05 mschimek Exp #
-
 #
-#  Rudimentary render code for Closed Caption (CC) test.
+# Description:
 #
+#   Example for the use of class Zvbi.ServiceDec, type Zvbi.VBI_EVENT_CAPTION.
+#   When called without an input stream, the application opens a GUI displaying
+#   a demo messages sequente (character sets etc.) for debugging the decoder.
+#   For displaying live CC streams you can use the following:
+#
+#      ./capture.py --sliced | ./caption.py
+#
+#   The buttons on top of the GUI switch between Closed Caption channels 1-4
+#   and Text channels 1-4.
+#
+#   (This script is a translation of test/caption.c in the libzvbi package,
+#   albeit based on TkInter here.)
 
 import sys
 import argparse
 import struct
 import tkinter.font as tkf
 from tkinter import *
+import select
 import Zvbi
 
 # declare global variables
@@ -265,7 +275,6 @@ def init_window():
 #
 #  Feed caption from live stream or file with sample data
 #
-
 def pes_mainloop():
     while True:
         buf = infile.read(2048)
@@ -284,32 +293,39 @@ def pes_mainloop():
     print("\rEnd of stream", file=sys.stderr)
 
 
+#
+#  Forward sliced data read from STDIN to service decoder
+#
 def old_mainloop():
-    # one one frame's worth of sliced data from the input stream or file
-    sl = read_sliced()
-    if sl:
-        (n_lines, timestamp, sliced) = sl
+    # avoid blocking in read when no data available: keep Tk mainloop alive
+    if select.select([infile], [], [], 0)[0]:
+        # one one frame's worth of sliced data from the input stream or file
+        sl = read_sliced()
+        if sl:
+            (n_lines, timestamp, sliced) = sl
 
-        # pack the read data into the normal slicer output format
-        # (i.e. the format delivered by the librarie's internal slicer)
-        REC_LEN = 4+4+56
-        buf = bytearray(n_lines * REC_LEN)
-        line_idx = 0
-        for slc_id, line, data in sliced:
-            struct.pack_into("=LL", buf, line_idx*REC_LEN, slc_id, line)
-            d_idx = 0
-            for d in data:
-                buf[line_idx*REC_LEN + 4+4 + d_idx] = d
-                d_idx += 1
-            line_idx += 1
+            # pack the read data into the normal slicer output format
+            # (i.e. the format delivered by the librarie's internal slicer)
+            REC_LEN = 4+4+56
+            buf = bytearray(n_lines * REC_LEN)
+            line_idx = 0
+            for slc_id, line, data in sliced:
+                struct.pack_into("=LL", buf, line_idx*REC_LEN, slc_id, line)
+                d_idx = 0
+                for d in data:
+                    buf[line_idx*REC_LEN + 4+4 + d_idx] = d
+                    d_idx += 1
+                line_idx += 1
 
-        # pass the full frame's data to the decoder
-        vbi.decode_bytes(buf, n_lines, timestamp)
+            # pass the full frame's data to the decoder
+            vbi.decode_bytes(buf, n_lines, timestamp)
 
-        tk.after(20, old_mainloop)
+            tk.after(20, old_mainloop)
 
+        else:
+            print("\rEnd of stream", file=sys.stderr)
     else:
-        print("\rEnd of stream", file=sys.stderr)
+        tk.after(20, old_mainloop)
 
 
 # ----------------------------------------------------------------------------
@@ -621,6 +637,7 @@ def main_func():
 
     if sys.stdin.isatty():
         # no file or stream on STDIN -> generate demo data
+        print("No input provided via STDIN - playing back demo sequence", file=sys.stderr)
         hello_world()
         # start play back of the demo data (timer-based, to give control to the main loop below)
         play_world()
@@ -641,4 +658,7 @@ def main_func():
     # everything from here on is event driven
     tk.mainloop()
 
-main_func()
+try:
+    main_func()
+except KeyboardInterrupt:
+    pass

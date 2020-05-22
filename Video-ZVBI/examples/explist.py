@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #
-#  libzvbi test
+#  libzvbi test of export interfaces
 #
 #  Copyright (C) 2000, 2001 Michael H. Schimek
 #  Perl Port: Copyright (C) 2007 Tom Zoerner
@@ -21,8 +21,12 @@
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #
 
-# Perl Id: explist.pl,v 1.1 2007/11/18 18:48:35 tom Exp tom 
-# libzvbi #Id: explist.c,v 1.10 2006/02/10 06:25:38 mschimek Exp #
+# Description:
+#
+#   Example for the use of export option management in class Zvbi.Export.
+#   Test of page export options and menu interfaces. The script lists all
+#   available export modules (i.e. formats) and options. (This is a direct
+#   translation of test/explist.c in the libzvbi package.)
 
 import sys
 import re
@@ -402,9 +406,11 @@ def list_modules():
 
 
 def ParseCmdOptions():
+    global opt
     parser = argparse.ArgumentParser(description='List all export modules and options')
-    parser.add_argument("-c", "--check", action='store_true', default=False)
-    return parser.parse_args()
+    parser.add_argument("--check", action='store_true', default=False, help="enable internal testing")
+    opt = parser.parse_args()
 
-opt = ParseCmdOptions()
+
+ParseCmdOptions()
 list_modules()

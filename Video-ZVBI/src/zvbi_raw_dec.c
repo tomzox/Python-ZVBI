@@ -57,18 +57,37 @@ static int
 ZvbiRawDec_init(ZvbiRawDecObj *self, PyObject *args, PyObject *kwds)
 {
     static char * kwlist[] = {"par", NULL};
-    int RETVAL = -1;
     PyObject * obj = NULL;
+    vbi_raw_decoder * p_par = NULL;
+    int RETVAL = -1;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &obj)) {
-        return -1;
-    }
+    if (PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &obj)) {
+        if (PyObject_IsInstance(obj, (PyObject*)&ZvbiCaptureTypeDef) == 1) {
+            vbi_capture * p_cap = ZvbiCapture_GetCtx(obj);
+            if (p_cap != NULL) {
+                p_par = vbi_capture_parameters(p_cap);
+                if (p_par != NULL) {
+                    RETVAL = 0;
+                }
+                else {
+                    PyErr_SetString(ZvbiRawDecError, "failed to get capture parameters from Capture object");
+                }
+            }
+        }
+        else if (PyObject_IsInstance(obj, (PyObject*)&ZvbiRawParamsTypeDef) == 1) {
+            vbi_raw_decoder * p_par = ZvbiRawParamsGetStruct(obj);
+            if (p_par != NULL) {
+                RETVAL = 0;
+            }
+        }
+        else {
+            // use standard exception TypeError as this error does not come from ZVBI library
+            PyErr_SetString(PyExc_TypeError, "Parameter is neither of type Zvbi.RawParams nor Zvbi.Capture");
+        }
 
-    if (PyObject_IsInstance(obj, (PyObject*)&ZvbiCaptureTypeDef) == 1) {
-        vbi_capture * p_cap = ZvbiCapture_GetCtx(obj);
-        vbi_raw_decoder * p_par = vbi_capture_parameters(p_cap);
         if (p_par != NULL) {
             // copy individual parameters from the given container into "self"
+            // do not overwrite "private" elements in the raw decoder context
             self->rd.scanning = p_par->scanning;
             self->rd.sampling_format = p_par->sampling_format;
             self->rd.sampling_rate = p_par->sampling_rate;
@@ -80,22 +99,8 @@ ZvbiRawDec_init(ZvbiRawDecObj *self, PyObject *args, PyObject *kwds)
             self->rd.count[1] = p_par->count[1];
             self->rd.interlaced = p_par->interlaced;
             self->rd.synchronous = p_par->synchronous;
-            RETVAL = 0;
-        }
-        else {
-            PyErr_SetString(ZvbiRawDecError, "failed to get capture parameters from Capture object");
         }
     }
-    else if (PyObject_IsInstance(obj, (PyObject*)&ZvbiRawParamsTypeDef) == 1) {
-        vbi_raw_decoder * p_par = ZvbiRawParamsGetStruct(obj);
-        self->rd = *p_par;
-        RETVAL = 0;
-    }
-    else {
-        // use standard exception TypeError as this error does not come from ZVBI library
-        PyErr_SetString(PyExc_TypeError, "Parameter is neither dict nor ZVBI capture reference");
-    }
-
     return RETVAL;
 }
 
@@ -186,42 +191,17 @@ ZvbiRawDec_resize(ZvbiRawDecObj *self, PyObject *args)
 static PyObject *
 ZvbiRawDec_decode(ZvbiRawDecObj *self, PyObject *args)
 {
-    PyObject * obj = NULL;
+    Py_buffer in_buf;
     double timestamp = 0.0;
-
-    if (!PyArg_ParseTuple(args, "O|d", &obj, &timestamp)) {
-        return NULL;
-    }
-
-    uint8_t * p_raw = NULL;
-    size_t raw_buf_size = 0;
-
-    if (PyObject_IsInstance(obj, (PyObject*)&ZvbiCaptureRawBufTypeDef) == 1) {
-        vbi_capture_buffer * p_raw_buf = ZvbiCaptureBuf_GetBuf(obj);
-        if (p_raw_buf != NULL) {
-            raw_buf_size = p_raw_buf->size;
-            p_raw = p_raw_buf->data;
-        }
-        else {
-            PyErr_SetString(ZvbiRawDecError, "Raw capture buffer contains no data");
-        }
-    }
-    else if (PyObject_IsInstance(obj, (PyObject*)&PyBytes_Type) == 1) {
-        p_raw = (uint8_t*) PyBytes_AsString(obj);
-        raw_buf_size = PyBytes_Size(obj);
-    }
-    else {
-        PyErr_SetString(PyExc_TypeError, "Parameter is neither a ZvbiCaptureRawBuf nor bytes object");
-    }
     PyObject * RETVAL = NULL;
 
-    if (p_raw != NULL) {
+    if (PyArg_ParseTuple(args, "y*|d", &in_buf, &timestamp)) {
         size_t raw_size = (self->rd.count[0] + self->rd.count[1]) * self->rd.bytes_per_line;
-        if (raw_buf_size >= raw_size) {
+        if (in_buf.len >= raw_size) {
             size_t size_sliced = (self->rd.count[0] + self->rd.count[1]) * sizeof(vbi_sliced);
             vbi_sliced * p_sliced = (vbi_sliced*) PyMem_Malloc(size_sliced);
             if (p_sliced != NULL) {
-                int nof_lines = vbi_raw_decode(&self->rd, p_raw, p_sliced);
+                int nof_lines = vbi_raw_decode(&self->rd, in_buf.buf, p_sliced);
 
                 RETVAL = ZvbiCaptureSlicedBuf_FromData(p_sliced, nof_lines, timestamp);
             }
@@ -232,6 +212,7 @@ ZvbiRawDec_decode(ZvbiRawDecObj *self, PyObject *args)
         else {
             PyErr_SetString(ZvbiRawDecError, "Input raw buffer is smaller than required for VBI geometry");
         }
+        PyBuffer_Release(&in_buf);
     }
     return RETVAL;
 }

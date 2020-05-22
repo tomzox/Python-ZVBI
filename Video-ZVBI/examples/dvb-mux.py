@@ -1,10 +1,5 @@
 #!/usr/bin/python3
 #
-#  Very simple test of the DVB PES multiplexer:
-#  - reading sliced data from an analog capture device
-#  - multiplexer output is written to STDOUT
-#  - output can be decoded with examples/decode.pl --pes --all
-#
 #  Copyright (C) 2007,2020 Tom Zoerner
 #
 #  This program is free software; you can redistribute it and/or modify
@@ -22,7 +17,15 @@
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #
 
-# Perl #Id: dvb-mux.pl,v 1.2 2020/04/01 07:31:19 tom Exp tom #
+# Description:
+
+#  Example for the use of class Zvbi.DvbDemux. This script excercises the
+#  DVB de-multiplexer functions: The script first opens the DVB device,
+#  the continuously captures VBI data, encodes it in a DVB packet stream
+#  and wites the result to STDOUT. The output stream can be decoded
+#  equivalently to that of capture.py, which is:
+#
+#    ./dvb-demux.py --pid NNN --sliced | ./decode.py --ttx
 
 import sys
 import argparse
@@ -47,13 +50,14 @@ def main_func():
                     Zvbi.VBI_SLICED_CAPTION_625 |
                     Zvbi.VBI_SLICED_WSS_625)
 
-    if opt.v4l2:
+    if opt.v4l2 or (opt.pid == 0 and not "dvb" in opt.device):
         opt_buf_count = 5
         opt_strict = 0
-        cap = Zvbi.Capture(opt.device, services=opt_services,
-                           buffers=opt_buf_count, strict=opt_strict, trace=opt.verbose)
+        cap = Zvbi.Capture.Analog(opt.device, services=opt_services,
+                                  buffers=opt_buf_count, strict=opt_strict,
+                                  trace=opt.verbose)
     else:
-        cap = Zvbi.Capture(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
+        cap = Zvbi.Capture.Dvb(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
 
     #Zvbi.set_log_on_stderr(-1)
 
@@ -115,14 +119,20 @@ def main_func():
 def ParseCmdOptions():
     global opt
     parser = argparse.ArgumentParser(description='DVB muxing example')
-    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0")
-    parser.add_argument("--pid", type=int, default=104)
-    parser.add_argument("--v4l2", action='store_true', default=False)
-    parser.add_argument("--use-feed", action='store_true', default=False)
-    parser.add_argument("--use-static", action='store_true', default=False)
-    parser.add_argument("--raw", action='store_true', default=False)
-    parser.add_argument("--verbose", "-v", action='store_true', default=False)
+    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0", help="Path to video capture device")
+    parser.add_argument("--pid", type=int, default=0, help="VBI channel PID for DVB")
+    parser.add_argument("--v4l2", action='store_true', default=False, help="Using analog driver interface")
+    parser.add_argument("--use-feed", action='store_true', default=False, help="Use feed/callback API of Zvbi.DvbMux")
+    parser.add_argument("--use-static", action='store_true', default=False, help="Use static packet API of Zvbi.DvbMux")
+    parser.add_argument("--raw", action='store_true', default=False, help="Include raw data in output")
+    parser.add_argument("--verbose", action='store_true', default=False, help="Enable trace output in the library")
     opt = parser.parse_args()
+
+    if opt.v4l2 and (opt.pid != 0):
+        print("Options --v4l2 and --pid are multually exclusive", file=sys.stderr)
+        sys.exit(1)
+    if not opt.v4l2 and (opt.pid == 0) and ("dvb" in opt.device):
+        print("WARNING: DVB devices require --pid parameter", file=sys.stderr)
 
 
 # main

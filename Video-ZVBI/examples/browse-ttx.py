@@ -19,6 +19,12 @@
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #
 
+# Description:
+#
+#   This script is an example for the use of classes Zvbi.Page and Zvbi.Export
+#   for rendering teletext pages. The script captures teletext from a given
+#   device and renders selected teletext pages in a simple GUI using TkInter.
+
 import sys
 import math
 import argparse
@@ -85,15 +91,15 @@ def cap_init():
     global tid_polling
 
     opt.verbose = False
-    if opt.v4l2:
+    if opt.v4l2 or (opt.pid == 0 and not "dvb" in opt.device):
         opt_buf_count = 5
         opt_services = Zvbi.VBI_SLICED_TELETEXT_B
         opt_scanning = (525 if opt.ntsc else (625 if opt.pal else 0))
         opt_strict = 0
-        cap = Zvbi.Capture(opt.device, services=opt_services, scanning=opt_scanning,
-                           buffers=opt_buf_count, strict=opt_strict, trace=opt.verbose)
+        cap = Zvbi.Capture.Analog(opt.device, services=opt_services, scanning=opt_scanning,
+                                  buffers=opt_buf_count, strict=opt_strict, trace=opt.verbose)
     else:
-        cap = Zvbi.Capture(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
+        cap = Zvbi.Capture.Dvb(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
 
     vtdec = Zvbi.ServiceDec()
     vtdec.event_handler_register(Zvbi.VBI_EVENT_TTX_PAGE, pg_handler)
@@ -327,15 +333,6 @@ def gui_init():
 
     redraw = False
 
-def ParseCmdOptions():
-    parser = argparse.ArgumentParser(description="Plotter of captured raw VBI data")
-    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0")
-    parser.add_argument("--pid", type=int, default=104)
-    parser.add_argument("--v4l2", action='store_true', default=False)
-    parser.add_argument("--pal", action='store_true', default=False)
-    parser.add_argument("--ntsc", action='store_true', default=False)
-    parser.add_argument("--verbose", action='count', default=0)
-    return parser.parse_args()
 
 def main_func():
     # create & display GUI
@@ -345,10 +342,29 @@ def main_func():
     cap_init()
 
     # everything from here on is event driven
-    try:
-        tk.mainloop()
-    except KeyboardInterrupt:
-        pass
+    tk.mainloop()
 
-opt = ParseCmdOptions()
-main_func()
+
+def ParseCmdOptions():
+    global opt
+    parser = argparse.ArgumentParser(description="Plotter of captured raw VBI data")
+    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0", help="Path to video capture device")
+    parser.add_argument("--pid", type=int, default=0, help="Teletext channel PID for DVB")
+    parser.add_argument("--v4l2", action='store_true', default=False, help="Using analog driver interface")
+    parser.add_argument("--pal", action='store_true', default=False, help="Assume PAL video norm (bktr driver only)")
+    parser.add_argument("--ntsc", action='store_true', default=False, help="Assume NTSC video norm (bktr driver only)")
+    parser.add_argument("--verbose", action='store_true', default=False, help="Enable trace output in the library")
+    opt = parser.parse_args()
+
+    if opt.v4l2 and (opt.pid != 0):
+        print("Options --v4l2 and --pid are multually exclusive", file=sys.stderr)
+        sys.exit(1)
+    if not opt.v4l2 and (opt.pid == 0) and ("dvb" in opt.device):
+        print("WARNING: DVB devices require --pid parameter", file=sys.stderr)
+
+
+try:
+    ParseCmdOptions()
+    main_func()
+except KeyboardInterrupt:
+    pass

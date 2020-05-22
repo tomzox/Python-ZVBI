@@ -1,17 +1,5 @@
 #!/usr/bin/python3
 #
-#  Very simple test of the DVB PES de-multiplexer:
-#  - reading stream from a DVB demux device
-#  - calling de-multiplexer for each chunk of data
-#  - forward sliced data
-#
-#  NOTE: Instead of reading from the device directly (and performing
-#  device ioctl with hard-coded constants, which is prone to breakage)
-#  you should use the Zvbi.Capture class which does that work for you.
-#  Using the DvbDemux class directly only is useful when receiving a
-#  stream from other sources (e.g. via socket from proxy on a remote
-#  host).
-#
 #  Copyright (C) 2020 T. Zoerner
 #
 #  This program is free software; you can redistribute it and/or modify
@@ -28,6 +16,20 @@
 #  along with this program; if not, write to the Free Software
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #
+
+# Description:
+#
+#   Very simple test of the DVB PES de-multiplexer:
+#   - reading stream from a DVB demux device
+#   - calling de-multiplexer for each chunk of data
+#   - forward sliced data
+#
+#   NOTE: Instead of reading from the device directly (and performing
+#   device ioctl with hard-coded constants, which is prone to breakage)
+#   you should use the Zvbi.Capture class which does that work for you.
+#   Using the DvbDemux class directly only is useful when receiving a
+#   stream from other sources (e.g. via socket from proxy on a remote
+#   host).
 
 import sys
 import fcntl
@@ -142,12 +144,12 @@ def main_func():
 def ParseCmdOptions():
     global opt
     parser = argparse.ArgumentParser(description='DVB de-multiplexer example')
-    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0")
-    parser.add_argument("--pid", type=int, default=0)
-    parser.add_argument("--use-callback", action='store_true', default=False)
-    parser.add_argument("--dump-sliced", action='store_true', default=False)
-    parser.add_argument("--sliced", action='store_true', default=False)
-    parser.add_argument("--verbose", action='count', default=0)
+    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0", help="Path to video capture device")  # dev_name,
+    parser.add_argument("--pid", type=int, default=0, help="Teletext channel PID for DVB")
+    parser.add_argument("--use-callback", action='store_true', default=False, help="Use feed/callback API of DvbDemux class")
+    parser.add_argument("--dump-sliced", action='store_true', default=False, help="Capture and all VBI services")
+    parser.add_argument("--sliced", action='store_true', default=False, help="Write binary output, for piping into decode.py")   # bin_sliced,
+    parser.add_argument("--verbose", action='store_true', default=False, help="Enable trace output in the library")
     opt = parser.parse_args()
 
     if opt.pid <= 0:
@@ -158,5 +160,5 @@ def ParseCmdOptions():
 try:
     ParseCmdOptions()
     main_func()
-except KeyboardInterrupt:
+except (KeyboardInterrupt, BrokenPipeError):
     pass

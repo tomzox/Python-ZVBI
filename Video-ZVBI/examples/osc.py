@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #
-#  libzvbi test
+#  libzvbi test of raw data capturing and raw decoding
 #
 #  Copyright (C) 2000-2002, 2004 Michael H. Schimek
 #  Copyright (C) 2003 James Mastros
@@ -22,8 +22,16 @@
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #
 
-# Perl #Id: osc.pl,v 1.2 2007/12/02 18:31:10 tom Exp tom #
-# libzvbi #Id: osc.c,v 1.29 2006/10/08 06:19:48 mschimek Exp #
+# Description:
+#
+#   Example for the use of class Zvbi.RawDec. The script continuously
+#   captures raw VBI data and displays the data as an animated gray-scale
+#   image. Below this, the analog wave line of one selected video line is
+#   plotted (i.e. essentially simulating an oscilloscope). For the
+#   selected line, the resulting data from slicing is also shown if
+#   decoding is successful.
+#
+#   (This script is loosely based on test/osc.c in the libzvbi package.)
 
 import sys
 import re
@@ -348,21 +356,10 @@ def cap_frame():
         if not opt.ignore_error:
             print("Capture error:", e, file=sys.stderr)
     except Zvbi.CaptureTimeout:
-        if not opt.ignore_error:
-            print("Capture timeout", file=sys.stderr)
+        # not an error/warning as this occurs regularly due to polling via 10ms timer
+        pass
 
     tk.after(10, cap_frame)
-
-
-def ParseCmdOptions():
-    parser = argparse.ArgumentParser(description="Plot raw captured VBI video lines")
-    parser.add_argument("--device", type=str, default="/dev/vbi0", help="Path to video capture device")
-    parser.add_argument("--pid", type=int, default=0, help="Teletext channel PID for DVB")
-    parser.add_argument("--pal", action='store_true', default=False, help="Force PAL video format")
-    parser.add_argument("--ntsc", action='store_true', default=False, help="Force NTSC video format")
-    parser.add_argument("--ignore-error", action='store_true', default=False, help="Ignore errors silently")
-    parser.add_argument("--verbose", action='count', default=0, help="Enable trace in VBI library")
-    return parser.parse_args()
 
 
 def main_func():
@@ -384,9 +381,11 @@ def main_func():
     opt_buf_count = 5
     opt_scanning = (525 if opt.ntsc else (625 if opt.pal else 0))
 
-    cap = Zvbi.Capture(opt.device, services=services, scanning=opt_scanning,
-                       buffers=opt_buf_count, strict=opt_strict, trace=opt.verbose,
-                       dvb_pid=opt.pid)
+    if opt.pid < 0:
+        cap = Zvbi.Capture.Analog(opt.device, services=services, scanning=opt_scanning,
+                                  buffers=opt_buf_count, strict=opt_strict, trace=opt.verbose)
+    else:
+        cap = Zvbi.Capture.Dvb(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
 
     rawdec = Zvbi.RawDec(cap)
     rawdec.add_services(services, opt_strict)
@@ -414,5 +413,20 @@ def main_func():
     tk.mainloop()
 
 
-opt = ParseCmdOptions()
+def ParseCmdOptions():
+    global opt
+    parser = argparse.ArgumentParser(description="Plot raw captured VBI video lines")
+    parser.add_argument("--device", type=str, default="/dev/vbi0", help="Path to video capture device")
+    parser.add_argument("--pid", type=int, default=0, help="Teletext channel PID for DVB")
+    parser.add_argument("--pal", action='store_true', default=False, help="Force PAL video format")
+    parser.add_argument("--ntsc", action='store_true', default=False, help="Force NTSC video format")
+    parser.add_argument("--ignore-error", action='store_true', default=False, help="Ignore errors silently")
+    parser.add_argument("--verbose", action='count', default=0, help="Enable trace in VBI library")
+    opt = parser.parse_args()
+
+    if (opt.pid == 0) and ("dvb" in opt.device):
+        print("WARNING: DVB devices require --pid parameter", file=sys.stderr)
+
+
+ParseCmdOptions()
 main_func()

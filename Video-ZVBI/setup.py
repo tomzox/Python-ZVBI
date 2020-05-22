@@ -54,22 +54,20 @@ class MyClean(install):
 
 this_directory = os.path.abspath(os.path.dirname(__file__))
 
-extrasrc = []
-extrainc = []
-extradef = []
-extralibs = []
-extralibdirs = []
+# platform-specific build parameters
+extrasrc = []       # extra source modules to compile
+extrainc = []       # include path
+extradef = []       # extra copile-switches
+extralibdirs = []   # extra library search path
+extralibs = []      # extra libraries to link against
 
-#
-# Perform a search for libzvbi and abort if it's missing
-#
-extralibs = ['zvbi']
-
+# BSD requires listing libraries that libzvbi depends on
 if re.match(r'bsd$', platform.system(), flags=re.IGNORECASE):
     extralibs += ['pthread', 'png', 'z']
 
 # ----------------------------------------------------------------------------
 
+# Assemble main README from doc/README.rsr plus all but the header of API doc
 with open(os.path.join(this_directory, 'doc/README.rst'), encoding='utf-8') as fh:
     long_description = fh.read()
 with open(os.path.join(this_directory, 'doc/ZVBI.rst'), encoding='utf-8') as fh:
@@ -87,6 +85,7 @@ with open(os.path.join(this_directory, 'doc/ZVBI.rst'), encoding='utf-8') as fh:
 if (sys.version_info[0] == 3) and (sys.version_info[1] < 8):
     extradef += [('NAMED_TUPLE_GC_BUG', 1)]
 
+# Definition of the "Zvbi" extension module
 ext = Extension('Zvbi',
                 sources       = ['src/zvbi.c',
                                  'src/zvbi_proxy.c',
@@ -108,11 +107,12 @@ ext = Extension('Zvbi',
                                 ] + extrasrc,
                 include_dirs  = ['src'] + extrainc,
                 define_macros = extradef,
-                libraries     = extralibs,
+                libraries     = ['zvbi'] + extralibs,
                 library_dirs  = extralibdirs,
-                undef_macros  = ["NDEBUG"]   # for debug build only
+                #undef_macros  = ["NDEBUG"]   # for debug build only
                )
 
+# Package definition
 setup(name='Zvbi',
       version='0.1.0',
       description='Interface to the Zapping VBI decoder library',
@@ -123,7 +123,7 @@ setup(name='Zvbi',
       url='https://github.com/tomzox/Python-Video-ZVBI',
       license = "GNU GPLv2",
       classifiers=[
-          'Development Status :: 4 - Beta',
+          'Development Status :: 3 - Alpha',
           "Programming Language :: C",
           "Programming Language :: Python :: 3",
           'Topic :: Multimedia :: Video :: Capture',

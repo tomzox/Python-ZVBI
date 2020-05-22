@@ -30,7 +30,6 @@
 // calculating delta, simply converting timer resolution should suffice.
 #define PTS_TO_TIMESTAMP(PTS) ((PTS) / 90000.0)
 
-// FIXME make this configurable
 // Default for the maximum number of sliced lines per frame (in iterator mode)
 #define SLICED_LINE_CNT 64
 
@@ -46,6 +45,7 @@ typedef struct vbi_dvb_demux_obj_struct {
     PyObject *      demux_user_data;
 
     // members for use in iterator mode (called "coroutine" in libzvbi)
+    unsigned        max_sliced_lines;
     Py_buffer       feed_buf;
     const uint8_t * p_feed_buf_src;
     unsigned int    feed_buf_left;
@@ -182,9 +182,10 @@ ZvbiDvbDemux_dealloc(ZvbiDvbDemuxObj *self)
 static int
 ZvbiDvbDemux_init(ZvbiDvbDemuxObj *self, PyObject *args, PyObject *kwds)
 {
-    static char * kwlist[] = {"callback", "user_data", NULL};
+    static char * kwlist[] = {"callback", "user_data", "max_sliced", NULL};
     PyObject * callback = NULL;
     PyObject * user_data = NULL;
+    unsigned max_sliced_lines = SLICED_LINE_CNT;
 
     // reset state in case the module is already initialized
     if (self->ctx) {
@@ -213,8 +214,8 @@ ZvbiDvbDemux_init(ZvbiDvbDemuxObj *self, PyObject *args, PyObject *kwds)
         self->ctx = NULL;
     }
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$OO", kwlist,
-                                     &callback, &user_data))
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$OOI", kwlist,
+                                     &callback, &user_data, &max_sliced_lines))
     {
         return -1;
     }
@@ -236,6 +237,7 @@ ZvbiDvbDemux_init(ZvbiDvbDemuxObj *self, PyObject *args, PyObject *kwds)
             self->demux_user_data = user_data;
             Py_INCREF(user_data);
         }
+        self->max_sliced_lines = max_sliced_lines;
         RETVAL = 0;
     }
     else {
@@ -330,11 +332,11 @@ ZvbiDvbDemux_IterNext(ZvbiDvbDemuxObj *self)
     if (self->feed_buf.buf != NULL) {
         if (self->feed_buf_left > 0) {
             if (self->p_sliced_buf == NULL) {
-                self->p_sliced_buf = PyMem_RawMalloc(sizeof(vbi_sliced) * SLICED_LINE_CNT);
+                self->p_sliced_buf = PyMem_RawMalloc(sizeof(vbi_sliced) * self->max_sliced_lines);
             }
             int64_t pts;
             n_lines = vbi_dvb_demux_cor(self->ctx,
-                                        self->p_sliced_buf, SLICED_LINE_CNT, &pts,
+                                        self->p_sliced_buf, self->max_sliced_lines, &pts,
                                         &self->p_feed_buf_src, &self->feed_buf_left);
             if (n_lines > 0) {
                 RETVAL = ZvbiCaptureSlicedBuf_FromData(self->p_sliced_buf, n_lines,

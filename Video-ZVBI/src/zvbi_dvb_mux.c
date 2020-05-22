@@ -26,10 +26,6 @@
 //  DVB multiplexer
 // ---------------------------------------------------------------------------
 
-// FIXME make this configurable
-// Default for packet output buffer size (in iterator mode)
-#define OUTPUT_BUF_SIZE 2048
-
 typedef struct vbi_dvb_mux_obj_struct {
     PyObject_HEAD
     vbi_dvb_mux *   ctx;
@@ -119,7 +115,8 @@ ZvbiDvbMux_dealloc(ZvbiDvbMuxObj *self)
 static int
 ZvbiDvbMux_init(ZvbiDvbMuxObj *self, PyObject *args, PyObject *kwds)
 {
-    static char * kwlist[] = {"pes", "ts_pid", "callback", "user_data", "raw_par", NULL};
+    static char * kwlist[] = {"pes", "ts_pid", "callback", "user_data",
+                              "raw_par", NULL};
     int pes = FALSE;
     int ts_pid = 0;
     PyObject * callback = NULL;
@@ -347,11 +344,12 @@ ZvbiDvbMux_IterNext(ZvbiDvbMuxObj *self)
         if (self->sliced_left > 0) {
             vbi_capture_buffer * p_raw_buf = (self->raw_buf_obj
                                     ? ZvbiCaptureBuf_GetBuf(self->raw_buf_obj) : NULL);
+            unsigned max_pkg_size = vbi_dvb_mux_get_max_pes_packet_size(self->ctx) + 4;
             if (self->buffer_obj == NULL) {
-                self->buffer_obj = PyBytes_FromStringAndSize(NULL, OUTPUT_BUF_SIZE);
+                self->buffer_obj = PyBytes_FromStringAndSize(NULL, max_pkg_size);
             }
             uint8_t * p_buffer = (uint8_t*) PyBytes_AS_STRING(self->buffer_obj);
-            unsigned buffer_left = OUTPUT_BUF_SIZE;
+            unsigned buffer_left = max_pkg_size;
 
             if (vbi_dvb_mux_cor(self->ctx,
                                 &p_buffer, &buffer_left,
@@ -365,8 +363,8 @@ ZvbiDvbMux_IterNext(ZvbiDvbMuxObj *self)
                     done = FALSE;
                 }
 
-                if (buffer_left != OUTPUT_BUF_SIZE) {
-                    _PyBytes_Resize(&self->buffer_obj, (Py_ssize_t)(OUTPUT_BUF_SIZE - buffer_left));
+                if (buffer_left != max_pkg_size) {
+                    _PyBytes_Resize(&self->buffer_obj, (Py_ssize_t)(max_pkg_size - buffer_left));
                     RETVAL = self->buffer_obj;
                     self->buffer_obj = NULL;  // now owned by RETVAL object
                 }

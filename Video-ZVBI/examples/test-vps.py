@@ -5,9 +5,12 @@
 #  Perl Port: Copyright (C) 2007 Tom Zoerner
 #  Python Port: Copyright (C) 2020 Tom Zoerner
 #
-
-# Perl Id: test-vps.pl,v 1.1 2007/11/18 18:48:35 tom Exp tom 
-# #Id: test-vps.c,v 1.3 2006/10/08 06:19:48 mschimek Exp 
+# Description:
+#
+#   This script contains tests for encoding and decoding the VPS data
+#   service on randomly generated data.
+#
+#   (This is a direct translation of test/test-vps.c in libzvbi.)
 
 import random
 import Zvbi

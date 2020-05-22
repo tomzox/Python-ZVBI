@@ -225,7 +225,7 @@ ZvbiExport_init(ZvbiExportObj *self, PyObject *args, PyObject *kwds)
     return RETVAL;
 }
 
-// TODO/FIXME use iterator instead
+// FIXME use iterator instead
 static PyObject *
 ZvbiExport_info_enum(ZvbiExportObj *self, PyObject *args)
 {
@@ -277,7 +277,7 @@ ZvbiExport_info_export(ZvbiExportObj *self, PyObject *args)
     return RETVAL;
 }
 
-// TODO/FIXME use iterator instead
+// FIXME use iterator instead
 static PyObject *
 ZvbiExport_option_info_enum(ZvbiExportObj *self, PyObject *args)
 {

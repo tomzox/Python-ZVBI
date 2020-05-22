@@ -19,8 +19,9 @@ SYNOPSIS
       vtdec.decode(sliced_buffer)
 
   def pg_handler(pgtype, ev, user_data=None):
-      pg = vtdec.fetch_vt_page(ev['pgno'])
-      pg.get_page_text()
+      with vtdec.fetch_vt_page(ev.pgno) as pg:
+          pg.get_page_text()
+          #...
 
 
 DESCRIPTION
@@ -42,11 +43,11 @@ The *Zvbi* Python module covers all exported libzvbi functions. Most of
 the libary functions and parameters are exposed equivalently, with
 adaptions to render the interface *Pythonic*.
 
-Note: This manual page does not reproduce the full documentation which is
-available along with libzvbi: Specifically, methods descriptions are fully
-included, but members of data structures are not fully documented here.
-Hence it's recommended that you use the libzvbi documentation generated
-via doxygen during a libzvbi build in parallel for such details, if needed.
+Note: This manual page does not reproduce the full documentation provided
+by libzvbi by means of doxygen: While methods descriptions are fully
+included, some data structures may not be not fully documented here.
+Hence when additional details are needed, it's recommended looking at
+libzvbi documentation, or directly at its source code.
 
 Class Hierarchy
 ===============
@@ -68,37 +69,37 @@ structured into classes, and how the classes are connected:
     respectively. Alternatively one can extract data from the buffers
     for direct processing within a Python script.
 `Zvbi.RawDec`_
-    This class can optionally be used for manual processing raw data (i.e.
-    direct output of the analog-to-digital conversion of the video signal)
-    optionally returned by the *Capture* class via *pull_raw()* methods
-    et.al. For most cases the processing (so-called "slicing") done under
-    control of the *Capture* class using *pull_sliced()* should be
-    sufficient, so this class is usually not needed. This class is not
+    This class can optionally be used for manually processing raw data
+    (i.e.  direct output of the analog-to-digital conversion of the video
+    signal) optionally returned by the *Capture* class via *pull_raw()*
+    methods et.al. For most use-cases the processing (so-called "slicing")
+    done under control of the *Capture* class using *pull_sliced()* should
+    be sufficient, so this class is usually not needed. This class is not
     applicable for DVB.
 `Zvbi.Proxy`_
-    This class allows accessing VBI devices via a proxy daemon. An instance
-    of this class would be provided to the *Capture* class constructor.
-    Using the proxy instead of capturing directly from a VBI device allows
-    multiple applications to capture concurrently (e.g. for decoding multiple
-    data services). Not applicable to DVB, as DVB drivers usually allow
-    capturing by multiple applications concurrently, so the proxy does not
-    support DVB.
+    This class allows accessing VBI devices via a proxy daemon. An
+    instance of this class would be provided to the *Capture* class
+    constructor.  Using the proxy instead of capturing directly from a VBI
+    device allows multiple applications to capture concurrently (e.g. for
+    decoding multiple data services). Not applicable to DVB, as the proxy
+    does not support DVB.  (Also at least the Linux DVB driver allows
+    multiple applications reading the same stream concurrently.)
 `Zvbi.ServiceDec`_
-    Class performing high level decoding of all supported services and storing
-    the data in an internal cache. The class takes input ("sliced data") from
-    the *Capture* class. The class supports callback functions for
-    notifications about received data; various interfaces allow extracting
-    the data in form of instances of the *Page* class, or as an image in
-    PPM or XPM formats.
+    Class performing high level decoding of all supported services and
+    storing the data in an internal cache. The class takes input ("sliced
+    data") from the *Capture* class. The class supports callback functions
+    for notifications about received data; various interfaces allow
+    extracting the data in form of instances of the *Page* class, or as an
+    image in PPM or XPM formats.
 `Zvbi.Search`_
     This class allows searching the cache maintained by *ServiceDec* for
     pages with text matching a pattern. The search returns instances of
     class *Page*.
 `Zvbi.Page`_
-    Instances of this class are produced by the *ServiceDec* query functions
-    or *Search*. Each instance represents a teletext (sub-)page or
-    Closed Caption page. The class has various interfaces for extracting
-    the text and properties of the page content.
+    Instances of this class are produced by the *ServiceDec* query
+    functions or *Search*. Each instance represents a teletext (sub-)page
+    or Closed Caption page. The class has various interfaces for
+    extracting the text and properties of the page content.
 `Zvbi.Export`_
     This class allows rendering an instance of *Page* in specific formats,
     for example as plain-text or image. The result can be returned within
@@ -132,12 +133,12 @@ Special-purpose classes for DVB:
     Video Broadcasting (DVB); Specification for the carriage of Vertical
     Blanking Information (VBI) data in DVB bit-streams".
 
-Classes for de-multiplexing data services transmitted within teletext
-packets. For PFC and IDL, libzvbi only supports the protocol, but the
-application has to decode and store payload data. XDS is supported by
-`Zvbi.ServiceDec`_ (decoding and event notifications). Most likely none
-of these protocols are used anymore, as they were intended for use via
-analog television broadcast:
+The following classes are for de-multiplexing data services transmitted
+within teletext packets. For PFC and IDL, libzvbi only supports the
+protocol, but the application has to decode and store payload data. XDS is
+supported by `Zvbi.ServiceDec`_ (decoding and event notifications). Most
+likely none of these protocols are used anymore, as they were intended for
+use via analog television broadcast:
 
 `Zvbi.IdlDemux`_
     This class allows decoding data transmissions within a Teletext
@@ -161,21 +162,26 @@ Class Zvbi.Capture
 This class is used for opening a DVB or analog "VBI" device and start
 receiving data from it.  The class does not support tuning of a channel.
 
-The constructor creates a capture context with the given parameters.
-Afterward, one of the *read* or *pull* methods (see below for hints which
-one to use) have to be called periodically for retrieving the data.
-Usually this is done within a quasi-infinite "while" loop (possibly in a
-separate thread), but most devices will support "select()" and thus allow
-asynchronous I/O via event handlers. If everything else fails, you can
-also use polling in fixed intervals slightly lower than the (interlaced)
-video frame rate (e.g. 2*30 Hz for NTSC, 2*25 Hz for PAL)
+Since parameters for capturing from DVB have little overlap with tose for
+analog devices, there isn't a single constructor. Instead there are two
+static methods which construct an instance. The class cannot be
+instantiated directly. Nevertheless, the capture instances created by the
+factory functions can be used equivalently for all other class methods.
 
-The context is automatically deleted and the device closed when the object
-is destroyed.
+After creating an instance, one of the *read* or *pull* methods (see below
+for hints which one to use) have to be called periodically for retrieving
+the data.  Usually this is done within a quasi-infinite "while" loop
+(possibly in a separate thread), but most devices will support "select()"
+and thus allow asynchronous I/O via event handlers. If everything else
+fails, you can also use polling in fixed intervals slightly lower than the
+(interlaced) video frame rate (e.g. 2*30 Hz for NTSC, 2*25 Hz for PAL)
 
 Upon failure, the constructor and all member functions raise exception
 *Zvbi.CaptureError*, containing a string describing the cause. (Additional
 exception types may be used for specific error cases.)
+
+The capture device is automatically closed when the *Zvbi.Capture* object
+is destroyed.
 
 There are two different types of capture functions: The functions named
 *read* copy captured data into a bytes object (where the copying is
@@ -196,29 +202,60 @@ has high bandwidth). DVB devices will not return raw data regardless of
 the chosen interface.
 
 
-Constructor Zvbi.Capture()
---------------------------
+Zvbi.Capture.Dvb()
+------------------
 
-There is a single constructor for the capture class that covers all
-supported device drivers. The constructor "auto-detects" the type of the
-given device by sequentially trying to access the device as DVB, "V4l2"
-(i.e. analog Linux video capture device), "bktr" (i.e. FreeBSD analog BSD
-video capture device), in this order.
+This *static* method creates and returns an instance of *Zvbi.Capture* for
+DVB devices. ::
 
-The following shows the complete signature of the constructor:
+   cap = Zvbi.Capture.Dvb(dev, dvb_pid=0, trace=False)
 
-::
-
-    cap = Zvbi.Capture(dev, dvb_pid=0, proxy=None,
-                       services=0, strict=0, buffers=5, scanning=0,
-                       trace=False)
-
-The device parameter is mandatory, all others are optional and
-keyword-only. The parameters have the following meaning:
+Input parameters:
 
 :dev:
     Path of the device to open (for Linux usually
-    `/dev/dvb/adapter0/demux0` or `/dev/vbi0`)
+    `/dev/dvb/adapter0/demux0`)
+:dvb_pid:
+    Specifies the number (PID) of a stream which contains VBI data, when
+    the device is a DVB capture card. Else the parameter has no effect.
+    If you omit this value, you need to configure it afterwards using
+    `Zvbi.Capture.dvb_filter()`_, otherwise there will be no reception.
+:trace:
+    If this option is present and *True*, output of progress messages on
+    `sys.stderr` is enabled.
+
+Note the PID value can often be derived from the PID for video in
+`channels.conf` by adding 3. Unfortunately there are exceptions from this
+rule.
+
+Zvbi.Capture.Analog()
+---------------------
+
+This *static* method creates and returns an instance of *Zvbi.Capture* for
+analog VBI devices (i.e. non-DVB devices).  The method "auto-detects" the
+type of the given device by sequentially trying to access the device as
+"V4l2" (i.e. analog Linux video capture device) and "bktr" (i.e.  FreeBSD
+analog BSD video capture device), in this order.
+
+::
+
+   cap = Zvbi.Capture.Analog(dev, services, proxy=None,
+                             strict=0, buffers=5, scanning=0, trace=False)
+
+The device and service parameters are mandatory, all others are optional and
+keyword-only. The parameters have the following meaning:
+
+:dev:
+    Path of the device to open (for Linux usually `/dev/vbi0`)
+:services:
+    Is a bit-wise OR of `VBI_SLICED_*` symbols describing the data
+    services to be decoded.  See `Zvbi.RawDec.add_services()`_ for
+    details.  If you want to capture raw data only, set to
+    `VBI_SLICED_VBI_525`, `VBI_SLICED_VBI_625` or both.  If this parameter
+    is omitted, no services will be installed (this is not supported for
+    BSD "bktr" drivers).  You can do so later with
+    *Zvbi.Capture.update_services()* (Note in this case the *reset*
+    parameter to that function will have to be set to True.).
 :proxy:
     When present, this has to be a reference to an instance of class
     `Zvbi.Proxy`_. The constructor will request start of capturing via the
@@ -227,69 +264,30 @@ keyword-only. The parameters have the following meaning:
     daemon. The proxy does not support DVB devices. If the connection
     fails, the constructor will not attempt direct device access; this
     means the call shuld be repeated without the proxy parameter.
-:dvb_pid:
-    Specifies the number (PID) of a stream which contains VBI data, when
-    the device is a DVB capture card. Else the parameter has no effect.
-    If you omit this value, you need to configure it afterwards using
-    `Zvbi.Capture.dvb_filter()`_, otherwise there will be no reception.
 :buffers:
     Number of device buffers for raw VBI data if the driver supports
     streaming. Use higher values if you cannot guarantee there is no
     latency on reading capture data (e.g. if your GUI runs in the same
     thread). Otherwise one bounce buffer is allocated for
-    *Zvbi.Capture.pull()*. Not applicable to DVB.
+    *Zvbi.Capture.pull()*.
 :scanning:
     Indicates the current norm: 625 for PAL and 525 for NTSC; set to 0 if
     you don't know (you should not attempt to query the device for the
-    norm, as this parameter is only required for old v4l (i.e. API v1)
-    drivers which don't support video standard query ioctls.)
-:services:
-    Is a bit-wise OR
-    of `VBI_SLICED_*` symbols describing the data services to be decoded.
-    See `Zvbi.RawDec.add_services()`_ for details.  If you want to capture
-    raw data only, set to `VBI_SLICED_VBI_525`, `VBI_SLICED_VBI_625` or
-    both.  If this parameter is omitted, no services will be installed.
-    You can do so later with *Zvbi.Capture.update_services()* (Note in this
-    case the *reset* parameter to that function will have to be set to
-    True.). Not applicable to DVB.
+    norm, as this parameter is only used for the ancient BSD "bktr" driver
+    which don't support video standard query ioctls.)
 :strict:
     The value can be 0, 1, or 2 for determining which services to allow
-    for raw decoding. For details see `Zvbi.RawDec.add_services()`_. Not
-    applicable to DVB.
+    for raw decoding. For details see `Zvbi.RawDec.add_services()`_.
 :trace:
     If True, enables output of progress messages on `sys.stderr`.
 
-As noted, not all parameters are applicable to each driver. Therefore it
-is not fully transparent to the application which driver is used. A
-portable application should support the following use-cases:
-
-**Capturing from a DVB driver**:
-Note the PID value can usually be derived from the PID for video in
-`channels.conf` by adding 3. ::
-
-    opt_device = "/dev/dvb/adapter0/demux0"
-    opt_pid = 104
-    opt_verbose = False
-
-    cap = Zvbi.Capture(opt_device, dvb_pid=opt_dvb, trace=opt_verbose)
-
-**Capturing from an analog capture card**: ::
-
-    opt_device = "/dev/vbi0"
-    opt_services = Zvbi.VBI_SLICED_TELETEXT_B
-    opt_strict = 0
-    opt_buf_count = 5
-    opt_verbose = False
-
-    cap = Zvbi.Capture(opt_device, services=opt_services, strict=opt_strict,
-                       buffers=opt_buf_count, trace=opt_verbose)
-
-**Capturing from an analog capture card via proxy**:
 Whenever possible, the proxy should be used instead of opening analog
 devices directly, since it allows the user to start multiple VBI clients
 concurrently. When this function fails (usually because the user hasn't
 started the proxy daemon) applications should automatically fall back to
-opening the device directly. ::
+opening the device directly.
+
+Example for using an analog source with auto-detection of a proxy: ::
 
     opt_device = "/dev/vbi0"
     opt_services = Zvbi.VBI_SLICED_TELETEXT_B
@@ -299,14 +297,14 @@ opening the device directly. ::
     try:
         proxy = Zvbi.Proxy(opt_device, appname="...", appflags=0, trace=opt_verbose)
 
-        cap = Zvbi.Capture(opt_device, proxy=proxy,
-                           services=opt_services, strict=opt_strict,
-                           buffers=opt_buf_count, trace=opt_verbose)
+        cap = Zvbi.Capture.Analog(opt_device, proxy=proxy,
+                                  services=opt_services, strict=opt_strict,
+                                  buffers=opt_buf_count, trace=opt_verbose)
     except Zvbi.ProxyError, Zvbi.CaptureError:
         # try again without proxy
-        cap = Zvbi.Capture(opt_device,
-                           services=opt_services, strict=opt_strict,
-                           buffers=opt_buf_count, trace=opt_verbose)
+        cap = Zvbi.Capture.Analog(opt_device,
+                                  services=opt_services, strict=opt_strict,
+                                  buffers=opt_buf_count, trace=opt_verbose)
 
 The first call of Zvbi.Capture() in the example establishes a new
 connection to a VBI proxy to open a VBI or DVB device for capturing.  On
@@ -315,6 +313,9 @@ equivalently as it would be done locally.  If the creation succeeds, and
 any of the requested services are available, capturing is started and all
 captured data is forwarded transparently to the client. See
 `Zvbi.Proxy`_ for details.
+
+The second call of Zvbi.Capture.Analog() in the example creates a local
+capture context.
 
 Zvbi.Capture.read_raw()
 -----------------------
@@ -768,14 +769,16 @@ Creates and initializes a new raw decoder context. Parameter *ref*
 specifies the physical parameters of the raw VBI image, such as the
 sampling rate, number of VBI lines etc.  The parameter can be either
 a reference to a capture context (`Zvbi.Capture`_)
-or raw capture parameters of type `Zvbi.RawParams`_. (See description of
-that class for a list of attributes.)
+or raw capture parameters of type `Zvbi.RawParams`_.
 
 A properly initialized instance of *Zvbi.RawParams* can be obtained either
 via method `Zvbi.Capture.parameters()`_ or `Zvbi.RawDec.parameters()`_.
 In case an instance of `Zvbi.Capture`_ is used as parameter to the
 constructor, decoder parameters are retrieved internally using
 `Zvbi.Capture.parameters()` for convenience.
+
+See description of class `Zvbi.RawParams`_ for a list of sampling
+parameters.
 
 Zvbi.RawDec.parameters()
 ------------------------
@@ -910,15 +913,15 @@ Zvbi.RawDec.decode()
     sliced_buffer = raw_dec.decode(raw_buffer)
 
 This is the main service offered by the raw decoder: Decodes a raw VBI
-image given in *ref*, consisting of several scan lines of raw VBI data,
-into sliced VBI lines in *buf*. The output is sorted by line number.
+image given in *raw_buffer*, consisting of several scan lines of raw VBI
+data. The output is sorted by line number.
 
-The input parameter *raw_buffer* can either be an object of type
-`Zvbi.CaptureRawBuf`_ as returned by the *pull* kind of `Zvbi.Capture`_
-methods (e.g.  `Zvbi.Capture.pull_raw()`_) or a bytes object filled with a
-byte sequence with the correct number of samples for the current geometry
+The input parameter *raw_buffer* can by any bytes-like object that
+contains at least the number of bytes required by the capture geometry
 (which is `par.bytes_per_line * (par.count_a + par.count_b)`, where *par*
-is the used instance of *Zvbi.RawParams*).
+is the used instance of *Zvbi.RawParams*). Usually the parameter is
+an object of type `Zvbi.CaptureRawBuf`_ as returned by the *pull* kind of
+`Zvbi.Capture`_ methods (e.g.  `Zvbi.Capture.pull_raw()`_).
 
 Return value is a buffer of type `Zvbi.CaptureSlicedBuf`_, containing the
 sliced output data. (Please refer to the descripion of that class for
@@ -926,12 +929,12 @@ details.) Upon errors the function raises exception *Zvbi.RawDecError*.
 
 Usually the sliced buffer result is forwarded to `Zvbi.ServiceDec.decode()`_.
 (See general description `Zvbi.RawDec`_ for an example control flow.)
-Note the buffer needs to be forwarded even if zero lines were sliced;
-refer to description of the method for details.
+Note in that case the buffer needs to be forwarded even if zero lines were
+sliced; refer to description of the method for details.
 
-Note this function attempts to learn which lines carry which data
-service, or none, to speed up decoding.  Hence you must use different
-raw decoder contexts for different devices.
+Note this function attempts to learn which lines carry which data service,
+or none, to speed up decoding. Hence you must use different raw decoder
+contexts for different devices.
 
 
 .. _Zvbi.RawParams:
@@ -1372,7 +1375,7 @@ the discrete method parameters replace attributes otherwise stored in
     This should be a copy of the *timestamp* value returned by the *read*
     and *pull* capture functions within `Zvbi.CaptureSlicedBuf`_ and
     `Zvbi.CaptureRawBuf`_ class.
-    
+
     The timestamps are expected to advance by 1/30 to 1/25 seconds for
     each call to this function. Different steps will be interpreted as
     dropped frames, which starts a re-synchronization cycle, eventually a
@@ -1488,10 +1491,11 @@ Zvbi.ServiceDec.fetch_vt_page()
 
 ::
 
-    pg = vt.fetch_vt_page(pgno, [subno],
+    with vt.fetch_vt_page(pgno, [subno],
                           max_level=Zvbi.VBI_WST_LEVEL_3p5,
                           display_rows=25,
-                          navigation=True)
+                          navigation=True) as pg:
+        # ... process page object 'pg'
 
 Fetches a Teletext page designated by parameters *pgno* and optionally *subno*
 from the cache, formats and returns it as an instance of `Zvbi.Page`_.  The
@@ -1538,8 +1542,7 @@ periods of time.
 **Note**: The returned object must be deleted to release resources which
 are locked internally in the library during the fetch. Page objects
 support Python's "Context Manager" protocol to allow doing this easily
-using the "with" statement. See the description of `Zvbi.Page`_ for an
-example.
+using the "with" statement. See also the description of `Zvbi.Page`_.
 
 
 Zvbi.ServiceDec.fetch_cc_page()
@@ -2705,19 +2708,6 @@ constraints:
 * synchronous must be *True*.
 
 
-Zvbi.DvbMux.mux_reset()
------------------------
-
-::
-
-    mx.mux_reset()
-
-This function clears the internal buffers of the DVB VBI multiplexer.
-
-After a reset call the *feed()* function will encode a new PES packet,
-discarding any data of the previous packet which has not been consumed by
-the application.
-
 Zvbi.DvbMux.feed()
 ------------------
 
@@ -2728,14 +2718,47 @@ This method provides the main service of class *Zvbi.DvbMux*: ::
 This function converts raw and/or sliced VBI data to one DVB VBI PES
 packet or one or more TS packets as defined in EN 300 472 and EN 301 775.
 
-When a callback was configured during instantiation, it is invoked once
-for each generated PES or TS packet. Else generated packets have to be
-retrieved using iteration on the object. Example for the latter: ::
+**Usage with a callback function:**
+
+When the DVB multiplexer was intiantiated with a callback function
+parameter, the *feed()* function invokes the callback for each generated
+PES or TS packet before it returns. Example for use of the callback: ::
+
+    def feed_cb(pkg, outfile):
+        bwritten = outfile.write(pkg)
+        return (bwritten == len(pkg))
+
+    outfile = open(SOME_FILE, "wb")
+    mux = Zvbi.DvbMux(pes=True, callback=feed_cb, user_data=outfile)
 
     sliced_buf = cap.pull_sliced(1000)
     mx.feed(service_mask, sliced_buf)
+
+The packet parameter is a *Bytes* object containing a copy of the
+generated packet. Parameter *user_data* loops back the object passed to
+the constructor; it is omitted here if not present in the constructor
+parameters.  The handler function has to return *True* on success and
+*False* on failure. In case of the latter, the *feed()* function
+terminates with exception *Zvbi.DvbMuxError*.
+
+**Usage without a callback function:**
+
+When the DVB multiplexer was intiantiated without a callback function
+parameter, generated packets have to be retrieved using iteration on the
+*DvbMux* object. Example usage for this mode: ::
+
+    sliced_buf = cap.pull_sliced(1000)
+    mx.feed(service_mask, sliced_buf)
+
     for pes_or_ts_packet in mx:
         # ... process pes_or_ts_packet
+
+Note each iteration pre-allocates a packet buffer of size
+`Zvbi.DvbMux.get_max_pes_packet_size()`_, which defaults to theoretical
+maximum 65504. For compatibility with decoders compliant to the Teletext
+buffer model defined in EN 300 472 the maximum should not exceed 1472
+bytes. For this reason and for efficiency, is is recommended to limit the
+maximum to a value such as 2048 using `Zvbi.DvbMux.set_pes_packet_size()`_.
 
 Input parameters:
 
@@ -2798,6 +2821,19 @@ may occur under the following circumstances:
   parameters.
 
 
+Zvbi.DvbMux.mux_reset()
+-----------------------
+
+::
+
+    mx.mux_reset()
+
+This function clears the internal buffers of the DVB VBI multiplexer.
+
+After a reset call the *feed()* function will encode a new PES packet,
+discarding any data of the previous packet which has not been consumed by
+the application.
+
 Zvbi.DvbMux.get_data_identifier()
 ---------------------------------
 
@@ -2832,7 +2868,7 @@ Zvbi.DvbMux.get_min_pes_packet_size()
 
     size = mx.get_min_pes_packet_size()
 
-Returns the maximum size of PES packets the multiplexer generates.
+Returns the minimum size of PES packets the multiplexer generates.
 
 Zvbi.DvbMux.get_max_pes_packet_size()
 -------------------------------------
@@ -2841,7 +2877,7 @@ Zvbi.DvbMux.get_max_pes_packet_size()
 
     size = mx.get_max_pes_packet_size()
 
-Returns the minimum size of PES packets the multiplexer generates.
+Returns the maximum size of PES packets the multiplexer generates.
 
 Zvbi.DvbMux.set_pes_packet_size()
 ---------------------------------
@@ -2850,12 +2886,11 @@ Zvbi.DvbMux.set_pes_packet_size()
 
     mx.set_pes_packet_size(min_size, max_size)
 
-Determines the minimum and maximum total size of PES packets
-generated by the multiplexer, including all header bytes. When
-the data to be stored in a packet is smaller than the minimum size,
-the multiplexer will fill the packet up with stuffing bytes. When
-the data is larger than the maximum size the *feed()* and
-*coroutine()* functions will fail.
+Determines the minimum and maximum total size of PES packets generated by
+the multiplexer, including all header bytes. When the data to be stored in
+a packet is smaller than the minimum size, the multiplexer will fill the
+packet up with stuffing bytes. When the data is larger than the maximum
+size the *feed()* function will fail.
 
 The PES packet size must be a multiple of 184 bytes, in the range 184
 to 65504 bytes inclusive, and this function will round *min_size* up
@@ -3071,27 +3106,30 @@ Constructor Zvbi.DvbDemux
 
 ::
 
-    dvb = Zvbi.DvbDemux( [callback [, user_data]] )
+    dvb = Zvbi.DvbDemux( [callback [, user_data]] [,max_sliced=64] )
 
 Creates and returns a new DVB VBI demultiplexer context taking a PES
 stream as input.
 
-When the optional callback parameter is present, it will be called from
-inside of method *feed* whenever a complete sliced data of a VBI frame is
-available during de-multiplexing the provided stream data. Optional
-parameter *user_data* is appended to the callback's parameter list, if
-present.  When the callback parameter is omitted, VBI data has to be
-extracted via iteration. See *dvb.feed()* for additional details.
+The constructor takes the following optional keyword-only parameters:
 
-Zvbi.DvbDemux.reset()
----------------------
+:callback:
+    When this parameter is present, it must be a function object. The
+    function will be called from inside of method *feed* whenever a
+    complete sliced data of a VBI frame is available during
+    de-multiplexing the provided stream data.
 
-::
+    When the callback parameter is omitted, VBI data has to be extracted
+    via iteration.  See *dvb.feed()* for additional details.
 
-    dvb.reset()
+:user_data:
+    If present, the passed object is appended to the callback's parameter
+    list. IF omitted, one parameter less is passed to the callback.
 
-Resets the DVB demux to the initial state as after creation.
-Intended to be used after channel changes.
+:max_sliced:
+    This optional parameter indicates the size of the buffer to allocate
+    for the sliced buffer to be returned by iteration (i.e. when no
+    callback is defined). The default is 64 lines per frame.
 
 Zvbi.DvbDemux.feed()
 --------------------
@@ -3102,10 +3140,17 @@ Zvbi.DvbDemux.feed()
 
 This function takes an arbitrary number of DVB PES data bytes in *buf*,
 filters out *PRIVATE_STREAM_1* packets, filters out valid VBI data units,
-converts them to format of C structure *vbi_sliced* (used internally in
-the library).  The function may raise exception *Zvbi.DvbDemuxError* if
-the data contained errors. When a callback is configured, the exception
-is also raised if the callback function returned value *False*.
+and stores them in objects of type `Zvbi.CaptureSlicedBuf`_ function may
+raise exception *Zvbi.DvbDemuxError* if the data contained errors. When a
+callback is configured, the exception is also raised if the callback
+function returned value *False*.
+
+Note the timestamp included in the generated `Zvbi.CaptureSlicedBuf`_
+instantes is derived from the presentation timestamp (PTS) of the DVB
+stream, converted from 1/90000 Hz to a second resolution (as *Float* type
+to allow fractions). The value does not represent seconds since
+1970-Jan-01, but can nevertheless be used equivalently to timestampts
+generated by class `Zvbi.Capture`_.
 
 Note: Demultiplexing of raw VBI data is not supported;
 any raw data present in the stream will be discarded.
@@ -3117,16 +3162,18 @@ parameter, the *feed* function invokes the callback for each completed VBI
 frame before it returns. The callback is invoked with the following
 signature: ::
 
-    ok = callback(sliced_buffer, pts, user_data)
+    ok = callback(sliced_buffer, user_data)
 
-The handler function has to return *True* on success, *False*. on failure.
-Parameters have the following meaning:
+The handler function has to return *True* on success and *False* on failure.
+Parameters to the callback have the following meaning:
 
 * *sliced_buffer* is an object of type `Zvbi.CaptureSlicedBuf`_,
   containing the sliced data and attributes (i.e. this is the same
   type as returned by `Zvbi.Capture`_ methods). Note the object passed
-  here is valid only for the duration of the callback execution.
-* *pts* is the timestamp.
+  here is valid only for the duration of the callback execution. (If
+  assigned to a global variable and accessed after the callback returns,
+  exception *ValueError* will be raised.)
+
 * *user_data* loops back the object passed via *user_data* parameter
   to the constructor. If not specified there, this parameter is omitted
   here.
@@ -3145,6 +3192,17 @@ Example usage for this mode: ::
         sliced_handler(sliced_buf, sliced_buf.timestamp)
 
 See also `examples/dvb-mux.py` for a working example.
+
+At most the maximum number of sliced lines indicated via parameter
+*max_sliced* (or default value 64) in the constructor is returned. If the
+frame contains more lines they are discarded sliently. To detect this, you
+can set *max_sliced* to plus one of the expected maximum and treat it as
+an overflow error if the increased maximum is reached. (The number of
+sliced lines in the returned buffer can be queried via `len(sliced_buf)`.)
+
+Note in contrary to callback mode, the life-time of returned *sliced_buf*
+objects is not limited by the library, as a separate buffer is allocated
+for each iteration, which is owned by the object.
 
 Zvbi.DvbDemux.set_log_fn()
 --------------------------
@@ -3171,6 +3229,16 @@ The handler function is called with the following parameters: *level*,
 
 Note: Kind and contents of log messages may change in the future.
 
+
+Zvbi.DvbDemux.reset()
+---------------------
+
+::
+
+    dvb.reset()
+
+Resets the DVB demux to the initial state as after creation.
+Intended to be used after channel changes.
 
 .. _Zvbi.IdlDemux:
 
@@ -3612,7 +3680,7 @@ Zvbi.unham8()
     val = Zvbi.unham8(ham_val)
 
 This function decodes the given Hamming-8/4 encoded value. The result
-is a 4-bit value, or -1 when there are uncorrectable errors.
+is a 4-bit value, or -1 when there are incorrectable errors.
 
 Zvbi.unham16p()
 ---------------
@@ -3623,7 +3691,7 @@ Zvbi.unham16p()
 
 This function decodes 2 Hamming-8/4 encoded bytes (taken from the bytes
 object *data* at the given *offset*). The result is an 8-bit value,
-or -1 when there are uncorrectable errors.
+or -1 when there are incorrectable errors.
 
 Zvbi.unham24p()
 ---------------
@@ -3634,7 +3702,7 @@ Zvbi.unham24p()
 
 This function decodes 3 Hamming-24/18 encoded bytes (taken from the bytes
 object *data* at the given *offset*). The result is an 8-bit value,
-or -1 when there are uncorrectable errors.
+or -1 when there are incorrectable errors.
 
 Zvbi.dec2bcd()
 --------------
@@ -3691,8 +3759,10 @@ Zvbi.vbi_decode_vps_cni()
 
     cni = Zvbi.decode_vps_cni(data)
 
-This function receives a sliced VPS line and returns a 16-bit CNI value,
-or raises exception *ZvbiError* in case of errors.
+This function takes a sliced VPS line in form of a bytes-like object
+holding at least 13 bytes. The function decodes the network identifier and
+returns it as a 16-bit CNI value. The function raises exception
+*ZvbiError* in case of errors.
 
 Zvbi.vbi_encode_vps_cni()
 -------------------------
@@ -3786,41 +3856,61 @@ only lower case accented characters.)
 Examples
 ========
 
-The `examples` sub-directory in the **Zvbi** package
-contains a number of scripts used to test the various interface
-functions. You can also use them as examples for your code:
+The `examples` sub-directory in the *Zvbi* package contains a number of
+scripts used to test the various interface functions. You can also use
+them as examples for your code.
+
+**Note**: Example command lines for scripts capturing directly from a
+DVB/VBI device shown below do not include options required for configuring
+the device. Generally, you'll need either 
+`--device /dev/dvb/adapter0/demux0 --pid PID` for DVB, or
+`--device /dev/vbi0` for analog capture devices.
 
 :capture.py:
     Example for the use of class `Zvbi.Capture`_.
-    The script captures sliced VBI data from a device.  Output can be
-    written to a file or passed via stdout into one of the following
+    The script captures VBI data from a device and slices it. The result
+    can be dumped for the various data services in form of hex-string plus
+    roughly decoded text (where applicable) for inspection of incoming
+    data. Altnernatively, output can be written to STDOUT for further
+    processing (decoding) by piping the data into one of the following
     example scripts.  Call with option `--help` for a list of options.
     (This is a translation of `test/capture.c` in the libzvbi package.)
 
 :decode.py:
     Example for the use of class `Zvbi.ServiceDec`_.
-    Decodes sliced VBI data on stdin, e. g. ::
+    Decodes sliced VBI data on STDIN, e.g. ::
 
-      ./capture --sliced | ./decode --ttx
+      ./capture.py --sliced | ./decode.py --ttx
 
     Call with option `--help` for a list of options.
     (This is a direct translation of `test/decode.c` in the libzvbi package.)
 
 :caption.py:
-    Example for the use of class `Zvbi.ServiceDec`_, type *Zvbi.VBI_EVENT_CAPTION*.
-    When called without an input stream, the application displays some
-    sample messages (character sets etc.) for debugging the decoder.
-    When the input stream is the output of `capture.py --sliced`
-    (see above), the applications displays the live CC stream received
-    from a VBI device.  The buttons on top switch between Closed Caption
-    channels 1-4 and Text channels 1-4.
+    Example for the use of class `Zvbi.ServiceDec`_, type
+    *Zvbi.VBI_EVENT_CAPTION*.  When called without an input stream, the
+    application opens a GUI displaying a demo messages sequente (character
+    sets etc.) for debugging the decoder. For displaying live CC streams
+    you can use the following: ::
+
+      ./capture.py --sliced | ./caption.py
+
+    The buttons on top of the GUI switch between Closed Caption channels
+    1-4 and Text channels 1-4.
     (This is a translation of `test/caption.c` in the libzvbi package,
     albeit based on TkInter here.)
 
 :export.py:
     Example for the use of export actions in class `Zvbi.Export`_.
-    The script captures from `/dev/vbi0` until the page specified on the
+    The script captures from a device until the page specified on the
     command line is found and then exports the page in a requested format.
+    Examples: ::
+
+      ./export.py text 100
+      ./export.py "png;reveal=1" 100 > page_100.png
+
+    Use ./explist.py for listing supported export formats (aka "modules")
+    and possible options. Note options are appended to the module name,
+    separated by semicolon as shown in the second example.
     (This is a direct translation of `test/export.c` in the libzvbi package.)
 
 :explist.py:
@@ -3836,8 +3926,10 @@ functions. You can also use them as examples for your code:
 
 :network.py:
     Example for the use of class `Zvbi.ServiceDec`_, type *Zvbi.VBI_EVENT_NETWORK*.
-    The script captures from `/dev/vbi0` until the currently tuned channel is
-    identified by means of VPS, PDC et.al.
+    This script shows how to identify a network from data transmitted in
+    XDS packets, Teletext packet 8/30 format 1 and 2, and VPS packets.
+    The script captures directly from a device until the currently tuned
+    channel is identified by means of VPS, PDC et.al.
     (This is a direct translation of `examples/network.c` in the libzvbi package.)
 
 :proxy-test.py:
@@ -3879,18 +3971,18 @@ functions. You can also use them as examples for your code:
     This script is a small example for use of the DVB multiplexer
     functions.  The scripts captures teletext from an analog VBI device
     and generates a PES or TS stream on STDOUT. Output can be decoded
-    with ::
+    with decode.py: ::
 
-        ./decode.py --pes --all < dvb_mux.out
+        ./dvb-mux.py | ./decode.py --pes --all
 
 :dvb-demux.py:
-    Example for the use of class `Zvbi.DvbDemux`_.
-    This script is a small example for use of the DVB de-multiplexer
-    functions. The function opens the DVB device and dumps all received
-    VBI data. The output can be decoded equivalently to that of
-    capture.py, which is ::
+    Example for the use of class `Zvbi.DvbDemux`_.  This script excercises
+    the DVB de-multiplexer functions: The script first opens the DVB
+    device, the continuously captures VBI data, encodes it in a DVB packet
+    stream and wites the result to STDOUT. The output stream can be decoded
+    equivalently to that of capture.py, which is: ::
 
-      ./dvb-demux.py --pid NNN --sliced | ./decode --ttx
+      ./dvb-demux.py --sliced | ./decode.py --ttx
 
 Authors
 =======

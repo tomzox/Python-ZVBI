@@ -21,10 +21,12 @@
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #
 
-# Perl Id: hamm.pl,v 1.1 2007/11/18 18:48:35 tom Exp tom 
-# ZVBI #Id: hamm.c,v 1.2 2006/03/17 13:37:05 mschimek Exp #
-
-# Automated test of the odd parity and Hamming test/set routines.
+# Description:
+#
+#   Automated test of the odd parity and Hamming encoder and decoder
+#   functions. Note this test runs for a long time.
+#
+#   (This is a direct translation of test/hamm.c in the libzvbi package.)
 
 import sys
 import random
@@ -102,7 +104,7 @@ def main_func():
         buf5 = Zvbi.unpar_str(buf4)
         assert (buf5[2] == (buf5[1] & 0x7F))
 
-    print("PASSED")
+    print("OK")
     print("Testing Hamming-8/4...")
 
     for i in range(0, 10000):

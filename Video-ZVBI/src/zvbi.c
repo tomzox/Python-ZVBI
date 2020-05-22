@@ -418,22 +418,18 @@ static PyObject *
 Zvbi_decode_vps_cni(PyObject *self, PyObject *args)
 {
     PyObject * RETVAL = NULL;
-    PyObject * in_obj = NULL;
+    Py_buffer in_buf;
 
-    if (PyArg_ParseTuple(args, "O!", &PyBytes_Type, &in_obj)) {
-        unsigned int cni;
-        char * p_data = NULL;
-        Py_ssize_t buf_size = 0;
-
-        if (PyBytes_AsStringAndSize(in_obj, &p_data, &buf_size) == 0) {
-            if (buf_size >= 13) {
-                vbi_decode_vps_cni(&cni, (uint8_t*)p_data);
-                RETVAL = PyLong_FromLong(cni);
-            }
-            else {
-                PyErr_SetString(ZvbiError, "decode_vps_cni: input buffer must have at least 13 bytes");
-            }
+    if (PyArg_ParseTuple(args, "y*", &in_buf)) {
+        if (in_buf.len >= 13) {
+            unsigned int cni = 0;
+            vbi_decode_vps_cni(&cni, (uint8_t*)in_buf.buf);
+            RETVAL = PyLong_FromLong(cni);
         }
+        else {
+            PyErr_SetString(ZvbiError, "decode_vps_cni: input buffer must have at least 13 bytes");
+        }
+        PyBuffer_Release(&in_buf);
     }
     return RETVAL;
 }

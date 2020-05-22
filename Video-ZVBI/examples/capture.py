@@ -21,8 +21,17 @@
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #
 
-# Perl Id: capture.pl,v 1.1 2007/11/18 18:48:35 tom Exp tom 
-# ZVBI #Id: capture.c,v 1.26 2006/10/08 06:19:48 mschimek Exp #
+# Description:
+#
+#   Example for the use of class Zvbi.Capture. The script captures VBI
+#   data from a device and slices it. The result can be dumped for the
+#   various data services in form of hex-string plus roughly decoded text
+#   (where applicable) for inspection of incoming data. Altnernatively,
+#   output can be written to STDOUT for further processing (decoding) by
+#   piping the data into one of the following example scripts. Call with
+#   option --help for a list of options.
+#
+#   (This is a translation of test/capture.c in the libzvbi package.)
 
 import argparse
 import sys
@@ -245,12 +254,23 @@ def binary_ts_pes(user_data, packet, packet_size):
 
 def mainloop(cap):
     dump = (opt.dump_wss or opt.dump_vps or opt.dump_sliced)
+    err_cnt = 0
 
     while True:
-        if not opt.pull:
-            raw_buf, sliced_buf = cap.read(4000)
-        else:
-            raw_buf, sliced_buf = cap.pull(4000)
+        try:
+            if not opt.pull:
+                raw_buf, sliced_buf = cap.read(1000)
+            else:
+                raw_buf, sliced_buf = cap.pull(1000)
+            err_cnt = 0
+        except Zvbi.CaptureError as e:
+            print("Capture error:", e, file=sys.stderr)
+            err_cnt += 1  # ignore occasional singular errors
+            if err_cnt >= 2:
+                break
+        except Zvbi.CaptureTimeout:
+            print("Capture timeout", file=sys.stderr)
+            continue
 
         if False:
             print(".", file=outfile)
@@ -271,32 +291,40 @@ def mainloop(cap):
 #static const char short_options[] = "123cd:elnpr:stvPT"
 
 def ParseCmdOptions():
+    global opt
     parser = argparse.ArgumentParser(description='ZVBI capturing example')
-    parser.add_argument("--desync", action='store_true', default=False)
-    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0")  # dev_name,
-    parser.add_argument("--ignore-error", action='store_true', default=False)
-    parser.add_argument("--pid", type=int, default=-1)
-    parser.add_argument("--dump-ttx", action='store_true', default=False)
-    parser.add_argument("--dump-xds", action='store_true', default=False)
-    parser.add_argument("--dump-cc", action='store_true', default=False)
-    parser.add_argument("--dump-wss", action='store_true', default=False)
-    parser.add_argument("--dump-vps", action='store_true', default=False)
-    parser.add_argument("--dump-sliced", action='store_true', default=False)
-    parser.add_argument("--pes", action='store_true', default=False)   # bin_pes,
-    parser.add_argument("--sliced", action='store_true', default=False)   # bin_sliced,
-    parser.add_argument("--ts", action='store_true', default=False)   # bin_ts,
-    parser.add_argument("--read", action='store_true', default=True)   # do_read,
-    parser.add_argument("--pull", action='store_true', default=False)   # do_read,
-    parser.add_argument("--strict", type=int, default=0)
-    parser.add_argument("--sim", action='store_true', default=False)   # do_sim,
-    parser.add_argument("--ntsc", action='store_true', default=False)   # scanning_ntsc,
-    parser.add_argument("--pal", action='store_true', default=False)   # scanning_pal,
+    parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0", help="Path to video capture device")  # dev_name,
+    parser.add_argument("--pid", type=int, default=0, help="Teletext channel PID for DVB")
+    parser.add_argument("--ignore-error", action='store_true', default=False, help="Suppress warnings about device errors")
+    parser.add_argument("--dump-ttx", action='store_true', default=False, help="Capture and dump teletext packets")
+    parser.add_argument("--dump-xds", action='store_true', default=False, help="Capture and dump CC XDS packets")
+    parser.add_argument("--dump-cc", action='store_true', default=False, help="Capture and dump CC packets")
+    parser.add_argument("--dump-wss", action='store_true', default=False, help="Capture and dump WSS")
+    parser.add_argument("--dump-vps", action='store_true', default=False, help="Capture and dump VPS data")
+    parser.add_argument("--dump-sliced", action='store_true', default=False, help="Capture and all VBI services")
+    #parser.add_argument("--pes", action='store_true', default=False)   # bin_pes,
+    #parser.add_argument("--ts", action='store_true', default=False)   # bin_ts,
+    parser.add_argument("--sliced", action='store_true', default=False, help="Write binary output, for piping into decode.py")   # bin_sliced,
+    parser.add_argument("--read", action='store_true', default=True, help="Use read methods of Zvbi.Capture class")   # do_read,
+    parser.add_argument("--pull", action='store_true', default=False, help="Use pull methods of Zvbi.Capture class")   # do_read,
+    parser.add_argument("--strict", type=int, default=0, help="Use strict mode 0,1,2 for adding VBI services")
+    #parser.add_argument("--desync", action='store_true', default=False)
+    #parser.add_argument("--sim", action='store_true', default=False)   # do_sim,
+    parser.add_argument("--pal", action='store_true', default=False, help="Assume PAL video norm (bktr driver only)")   # scanning_pal,
+    parser.add_argument("--ntsc", action='store_true', default=False, help="Assume NTSC video norm (bktr driver only)")   # scanning_ntsc,
     #parser.add_argument("--v4l", action='store_true', default=False)   # api_v4l,
-    #parser.add_argument("--v4l2", action='store_true', default=False)   # api_v4l2,
+    parser.add_argument("--v4l2", action='store_true', default=False, help="Using analog driver interface")
     #parser.add_argument("--v4l2-read", action='store_true', default=False)   # api_v4l2, # FIXME
     #parser.add_argument("--v4l2-mmap", action='store_true', default=False)   # api_v4l2, # FIXME
-    parser.add_argument("--verbose", action='count', default=0)
-    return parser.parse_args()
+    parser.add_argument("--verbose", action='store_true', default=False, help="Enable trace output in the library")
+    opt = parser.parse_args()
+
+    if opt.v4l2 and (opt.pid != 0):
+        print("Options --v4l2 and --pid are multually exclusive", file=sys.stderr)
+        sys.exit(1)
+    if not opt.v4l2 and (opt.pid == 0) and ("dvb" in opt.device):
+        print("WARNING: DVB devices require --pid parameter", file=sys.stderr)
+
 
 def main_func():
     if opt.pal:
@@ -320,19 +348,23 @@ def main_func():
                 Zvbi.VBI_SLICED_WSS_625 |
                 Zvbi.VBI_SLICED_WSS_CPR1204)
 
-    if opt.sim:
+    if False: #opt.sim:
         #TODO cap = Zvbi.sim_new (scanning, services, 0, !opt.desync)
         #par = cap.parameters()
         pass
+    elif opt.v4l2 or (opt.pid == 0 and not "dvb" in opt.device):
+        cap = Zvbi.Capture.Analog(opt.device, services=services, scanning=scanning,
+                                  dvb_pid=opt.pid, strict=opt.strict, trace=opt.verbose,
+                                  buffers=5)
+        par = cap.parameters()
     else:
-        cap = Zvbi.Capture(opt.device, services=services, scanning=scanning,
-                           dvb_pid=opt.pid, strict=opt.strict, trace=opt.verbose,
-                           buffers=5)
+        cap = Zvbi.Capture.Dvb(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
         par = cap.parameters()
 
     if opt.verbose > 1:
-        #TODO cap.set_log_fp (STDERR)
-        pass
+        Zvbi.set_log_on_stderr(Zvbi.VBI_LOG_ERROR |
+                               Zvbi.VBI_LOG_WARNING |
+                               Zvbi.VBI_LOG_INFO)
 
     if opt.pid == -1:
         if par.sampling_format != Zvbi.VBI_PIXFMT_YUV420:
@@ -362,7 +394,7 @@ def main_func():
 
 # main
 try:
-    opt = ParseCmdOptions()
+    ParseCmdOptions()
     main_func()
 except (KeyboardInterrupt, BrokenPipeError):
     pass
