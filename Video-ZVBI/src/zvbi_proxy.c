@@ -147,9 +147,12 @@ ZvbiProxy_set_callback(ZvbiProxyObj *self, PyObject *args)
     PyObject * handler_obj = NULL;
     PyObject * user_data_obj = NULL;
 
-    if (!PyArg_ParseTuple(args, "|OO", &handler_obj, &user_data_obj)) {
+    if (!PyArg_ParseTuple(args, "|OO", &handler_obj, &user_data_obj) ||
+        !ZvbiCallbacks_CheckObj(handler_obj))
+    {
         return NULL;
     }
+
     // free old callback objects
     if (self->proxy_cb != NULL) {
         Py_DECREF(self->proxy_cb);

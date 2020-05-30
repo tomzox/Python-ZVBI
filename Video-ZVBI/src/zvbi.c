@@ -98,8 +98,13 @@ Zvbi_par8(PyObject *self, PyObject *args)
     unsigned val;
 
     if (PyArg_ParseTuple(args, "I", &val)) {
-        unsigned result = vbi_par8(val);
-        RETVAL = PyLong_FromLong(result);
+        if (val <= 0x7F) {
+            unsigned result = vbi_par8(val);
+            RETVAL = PyLong_FromLong(result);
+        }
+        else {
+            PyErr_SetString(PyExc_ValueError, "Value must be in range 0 ... 0x7F");
+        }
     }
     return RETVAL;
 }
@@ -111,8 +116,13 @@ Zvbi_unpar8(PyObject *self, PyObject *args)
     unsigned val;
 
     if (PyArg_ParseTuple(args, "I", &val)) {
-        int result = vbi_unpar8(val);  // -1 on error
-        RETVAL = PyLong_FromLong(result);
+        if (val <= 0xFF) {
+            int result = vbi_unpar8(val);  // -1 on error
+            RETVAL = PyLong_FromLong(result);
+        }
+        else {
+            PyErr_SetString(PyExc_ValueError, "Value must be in range 0 ... 0xFF");
+        }
     }
     return RETVAL;
 }
@@ -284,7 +294,12 @@ Zvbi_dec2bcd(PyObject *self, PyObject *args)
     PyObject * RETVAL = NULL;
 
     if (PyArg_ParseTuple(args, "I", &dec)) {
-        RETVAL = PyLong_FromLong(vbi_dec2bcd(dec));
+        if (dec <= 999) {
+            RETVAL = PyLong_FromLong(vbi_dec2bcd(dec));
+        }
+        else {
+            PyErr_SetString(PyExc_ValueError, "Value must be in range 0 ... 999");
+        }
     }
     return RETVAL;
 }
@@ -296,7 +311,17 @@ Zvbi_bcd2dec(PyObject *self, PyObject *args)
     PyObject * RETVAL = NULL;
 
     if (PyArg_ParseTuple(args, "I", &bcd)) {
-        RETVAL = PyLong_FromLong(vbi_bcd2dec(bcd));
+        if (vbi_is_bcd(bcd)) {
+            if ((bcd & ~0xFFFU) == 0) {
+                RETVAL = PyLong_FromLong(vbi_bcd2dec(bcd));
+            }
+            else {
+                PyErr_SetString(PyExc_ValueError, "BCD value must be in range 0 ... 0x999");
+            }
+        }
+        else {
+            PyErr_SetString(PyExc_ValueError, "Input value is not valid BCD");
+        }
     }
     return RETVAL;
 }
@@ -309,7 +334,12 @@ Zvbi_add_bcd(PyObject *self, PyObject *args)
     PyObject * RETVAL = NULL;
 
     if (PyArg_ParseTuple(args, "II", &bcd1, &bcd2)) {
-        RETVAL = PyLong_FromLong(vbi_add_bcd(bcd1, bcd2));
+        if (vbi_is_bcd(bcd1) && vbi_is_bcd(bcd2)) {
+            RETVAL = PyLong_FromLong(vbi_add_bcd(bcd1, bcd2));
+        }
+        else {
+            PyErr_SetString(PyExc_ValueError, "Input values are not valid BCD");
+        }
     }
     return RETVAL;
 }
@@ -377,25 +407,27 @@ Zvbi_set_log_fn(PyObject *self, PyObject *args)
     PyObject * user_data = NULL;
     PyObject * RETVAL = NULL;
 
-    if (!PyArg_ParseTuple(args, "IO|O", &mask, &log_fn, &user_data))
-        return NULL;
-
-    ZvbiCallbacks_free_by_obj(ZvbiCallbacks.log, NULL);
-    if (log_fn != NULL) {
-        unsigned cb_idx = ZvbiCallbacks_alloc(ZvbiCallbacks.log, log_fn, user_data, NULL);
-        if (cb_idx < ZVBI_MAX_CB_COUNT) {
-            vbi_set_log_fn(mask, zvbi_xs_log_callback, UINT2PVOID(cb_idx));
+    if (PyArg_ParseTuple(args, "I|OO", &mask, &log_fn, &user_data) &&
+        ZvbiCallbacks_CheckObj(log_fn))
+    {
+        ZvbiCallbacks_free_by_obj(ZvbiCallbacks.log, NULL);
+        if ((mask != 0) && (log_fn != NULL)) {
+            unsigned cb_idx = ZvbiCallbacks_alloc(ZvbiCallbacks.log, log_fn, user_data, NULL);
+            if (cb_idx < ZVBI_MAX_CB_COUNT) {
+                vbi_set_log_fn(mask, zvbi_xs_log_callback, UINT2PVOID(cb_idx));
+                Py_INCREF(Py_None);
+                RETVAL = Py_None;
+            }
+            else {
+                // should never happen as we de-register all old handlers above
+                PyErr_SetString(ZvbiError, "Max. logging callback count exceeded");
+            }
+        }
+        else {
+            vbi_set_log_fn(0, NULL, NULL);
             Py_INCREF(Py_None);
             RETVAL = Py_None;
         }
-        else {
-            PyErr_SetString(ZvbiError, "Max. log callback count exceeded");
-        }
-    }
-    else {
-        vbi_set_log_fn(0, NULL, NULL);
-        Py_INCREF(Py_None);
-        RETVAL = Py_None;
     }
     return RETVAL;
 }
@@ -409,7 +441,12 @@ Zvbi_set_log_on_stderr(PyObject *self, PyObject *args)
         return NULL;
 
     ZvbiCallbacks_free_by_obj(ZvbiCallbacks.log, NULL);
-    vbi_set_log_fn(mask, vbi_log_on_stderr, NULL);
+    if (mask != 0) {
+        vbi_set_log_fn(mask, vbi_log_on_stderr, NULL);
+    }
+    else {
+        vbi_set_log_fn(0, NULL, NULL);
+    }
 
     Py_RETURN_NONE;
 }
@@ -491,12 +528,13 @@ Zvbi_iconv_caption(PyObject *self, PyObject *args)
 {
     PyObject * RETVAL = NULL;
     Py_buffer in_buf;
-    int repl_char = '?';
+    int repl_char = 0;
 
     if (PyArg_ParseTuple(args, "s*|C", &in_buf, &repl_char)) {
         char * p_buf = vbi_strndup_iconv_caption("UTF-8", in_buf.buf, in_buf.len, repl_char);
         if (p_buf != NULL) {
-            RETVAL = PyBytes_FromString(p_buf);
+            RETVAL = PyUnicode_DecodeUTF8(p_buf, strlen(p_buf), NULL);
+            free(p_buf);
         }
         else {
             // source buffer contains invalid two-byte chars (or out of memory)
@@ -533,35 +571,35 @@ Zvbi_caption_unicode(PyObject *self, PyObject *args)
 
 static PyMethodDef Zvbi_Methods[] =
 {
-    {"par8",              Zvbi_par8,              METH_VARARGS, NULL},
-    {"unpar8",            Zvbi_unpar8,            METH_VARARGS, NULL},
-    {"par_str",           Zvbi_par_str,           METH_VARARGS, NULL},
-    {"unpar_str",         Zvbi_unpar_str,         METH_VARARGS, PyDoc_STR("Decode parity and convert to string")},
-    {"rev8",              Zvbi_rev8,              METH_VARARGS, NULL},
-    {"rev16",             Zvbi_rev16,             METH_VARARGS, NULL},
-    {"rev16p",            Zvbi_rev16p,            METH_VARARGS, NULL},
-    {"ham8",              Zvbi_ham8,              METH_VARARGS, NULL},
-    {"unham8",            Zvbi_unham8,            METH_VARARGS, NULL},
-    {"unham16p",          Zvbi_unham16p,          METH_VARARGS, NULL},
-    {"unham24p",          Zvbi_unham24p,          METH_VARARGS, NULL},
+    {"par8",              Zvbi_par8,              METH_VARARGS, PyDoc_STR("Encode the given 7-bit value with Parity and return an 8-bit value in range 0..255")},
+    {"unpar8",            Zvbi_unpar8,            METH_VARARGS, PyDoc_STR("Decode the given Parity encoded 8-bit value and return a 7-bit value in the range 0...127, or a negative value upon parity error")},
+    {"par_str",           Zvbi_par_str,           METH_VARARGS, PyDoc_STR("Encode a string with Parity and return the result as a bytes object")},
+    {"unpar_str",         Zvbi_unpar_str,         METH_VARARGS, PyDoc_STR("Decode a Parity encoded string and return the result as a bytes object")},
+    {"rev8",              Zvbi_rev8,              METH_VARARGS, PyDoc_STR("Reverse order of all bits of the given 8-bit integer value")},
+    {"rev16",             Zvbi_rev16,             METH_VARARGS, PyDoc_STR("Reverse order of all bits of the given 16-bit integer value")},
+    {"rev16p",            Zvbi_rev16p,            METH_VARARGS, PyDoc_STR("Reverse all bits of two consecutive bytes in the given bytes-like object starting at the given offset and return them as a 16-bit integer value")},
+    {"ham8",              Zvbi_ham8,              METH_VARARGS, PyDoc_STR("Encode the given 4-bit integer value (i.e. range 0..15) with Hamming-8/4")},
+    {"unham8",            Zvbi_unham8,            METH_VARARGS, PyDoc_STR("Decode the given Hamming-8/4 encoded integer value. The result is a 4-bit integer value, or -1 upon incorrectable errors")},
+    {"unham16p",          Zvbi_unham16p,          METH_VARARGS, PyDoc_STR("Decode two Hamming-8/4 encoded bytes (taken from the given bytes-like object at the given offset, and returns an 8-bit integer value, -1 when upon incorrectable errors")},
+    {"unham24p",          Zvbi_unham24p,          METH_VARARGS, PyDoc_STR("Decode three Hamming-24/18 encoded bytes (taken from the bytes-like object data at the given offset and returns a 12-bit integer value, or -1 upon incorrectable errors")},
 
-    {"dec2bcd",           Zvbi_dec2bcd,           METH_VARARGS, NULL},
-    {"bcd2dec",           Zvbi_bcd2dec,           METH_VARARGS, NULL},
-    {"add_bcd",           Zvbi_add_bcd,           METH_VARARGS, NULL},
-    {"is_bcd",            Zvbi_is_bcd,            METH_VARARGS, NULL},
+    {"dec2bcd",           Zvbi_dec2bcd,           METH_VARARGS, PyDoc_STR("Convert an integer value in range 0 ... 999 into a packed BCD number (binary coded decimal) in range 0x000 ... 0x999")},
+    {"bcd2dec",           Zvbi_bcd2dec,           METH_VARARGS, PyDoc_STR("Convert a packed BCD number in range 0x000 ... 0xFFF into a regular integer value (i.e. two's complement binary) in range 0 ... 999")},
+    {"add_bcd",           Zvbi_add_bcd,           METH_VARARGS, PyDoc_STR("Add two packed BCD numbers, returning a packed BCD sum")},
+    {"is_bcd",            Zvbi_is_bcd,            METH_VARARGS, PyDoc_STR("Tests if the given value forms a valid BCD number (range 0x00000000 ... 0x09999999, where each hex nibble in range 0..9)")},
 
     {"lib_version",       Zvbi_lib_version,       METH_NOARGS,  PyDoc_STR("Return tuple with library version")},
     {"check_lib_version", Zvbi_check_lib_version, METH_VARARGS, PyDoc_STR("Check if library version is equal or newer than the given")},
-    {"set_log_fn",        Zvbi_set_log_fn,        METH_VARARGS, NULL},
-    {"set_log_on_stderr", Zvbi_set_log_on_stderr, METH_VARARGS, NULL},
+    {"set_log_fn",        Zvbi_set_log_fn,        METH_VARARGS, PyDoc_STR("Enable or disable trace messages in the libzvbi library for events matching the given mask via the given callback function")},
+    {"set_log_on_stderr", Zvbi_set_log_on_stderr, METH_VARARGS, PyDoc_STR("Enable or disable trace in the libzvbi library for events matching the given mask to stderr")},
 
-    {"decode_vps_cni",    Zvbi_decode_vps_cni,    METH_VARARGS, NULL},
-    {"encode_vps_cni",    Zvbi_encode_vps_cni,    METH_VARARGS, NULL},
+    {"decode_vps_cni",    Zvbi_decode_vps_cni,    METH_VARARGS, PyDoc_STR("Extract the 16-bit CNI value (i.e. network identification) from the given sliced VPS line of at least 13 bytes")},
+    {"encode_vps_cni",    Zvbi_encode_vps_cni,    METH_VARARGS, PyDoc_STR("Generate a bytes object containing a VPS sliced line with the given 16-bit CNI value")},
 
-    {"rating_string",     Zvbi_rating_string,     METH_VARARGS, NULL},
-    {"prog_type_string",  Zvbi_prog_type_string,  METH_VARARGS, NULL},
-    {"iconv_caption",     Zvbi_iconv_caption,     METH_VARARGS, NULL},
-    {"caption_unicode",   Zvbi_caption_unicode,   METH_VARARGS, NULL},
+    {"rating_string",     Zvbi_rating_string,     METH_VARARGS, PyDoc_STR("Return a string describing the rating specified by the given rating-authority and ID")},
+    {"prog_type_string",  Zvbi_prog_type_string,  METH_VARARGS, PyDoc_STR("Return a string describing the program classification specified by the given classifier and ID")},
+    {"iconv_caption",     Zvbi_iconv_caption,     METH_VARARGS, PyDoc_STR("Convert a string of EIA 608 Closed Caption characters into a Unicode string.")},
+    {"caption_unicode",   Zvbi_caption_unicode,   METH_VARARGS, PyDoc_STR("Convert a single Closed Caption character code into a Unicode string")},
 
     {NULL}       // sentinel
 };

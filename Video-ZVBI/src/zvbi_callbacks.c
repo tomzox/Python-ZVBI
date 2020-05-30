@@ -92,3 +92,13 @@ ZvbiCallbacks_free_by_obj( ZvbiCallacksEntry_t * p_list, void * p_obj )
         }
     }
 }
+
+vbi_bool
+ZvbiCallbacks_CheckObj( PyObject * cb_obj )
+{
+    if ((cb_obj != NULL) && !PyCallable_Check(cb_obj)) {
+        PyErr_SetString(PyExc_TypeError, "Callback parameter is not a callable object");
+        return FALSE;
+    }
+    return TRUE;
+}

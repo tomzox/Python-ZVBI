@@ -21,10 +21,11 @@
 #  Description:
 #
 #   Example for the use of class Zvbi.Proxy. The script can capture either
-#   from a proxy daemon or a local device and dumps captured data on the
-#   terminal. Also allows changing services and channels during capturing
-#   (e.g. by entering "+ttx" or "-ttx" on stdin.) Start with option -help
-#   for a list of supported command line options.
+#   from a proxy daemon or a local device. Continuously shows summary of
+#   captured data on the terminal. Also allows changing services and
+#   channels during capturing (e.g.  by entering "+ttx" or "-ttx" via
+#   terminal at STDIN.) Run the script with option -help for a list of
+#   supported command line options.
 #
 #   (This is a direct translation of test/proxy-test.c in libzvbi.)
 

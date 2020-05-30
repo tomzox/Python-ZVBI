@@ -144,7 +144,7 @@ def ParseCmdOptions():
     opt = parser.parse_args()
 
     if opt.v4l2 and (opt.pid != 0):
-        print("Options --v4l2 and --pid are multually exclusive", file=sys.stderr)
+        print("Options --v4l2 and --pid are mutually exclusive", file=sys.stderr)
         sys.exit(1)
     if not opt.v4l2 and (opt.pid == 0) and ("dvb" in opt.device):
         print("WARNING: DVB devices require --pid parameter", file=sys.stderr)

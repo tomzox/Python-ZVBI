@@ -87,11 +87,11 @@ def main_func():
         assert (r == Zvbi.rev8(n))
 
         if (parity (n & 0xFF)):
-            assert (Zvbi.unpar8(n) == cast_int(n & 127))
+            assert (Zvbi.unpar8(n & 0xFF) == cast_int(n & 127))
         else:
-            assert (-1 == Zvbi.unpar8(n))
+            assert (-1 == Zvbi.unpar8(n & 0xFF))
 
-        assert (Zvbi.unpar8(Zvbi.par8(n)) >= 0)
+        assert (Zvbi.unpar8(Zvbi.par8(n & 0x7F)) >= 0)
 
         buf2 = Zvbi.par_str(buf)
         buf3 = Zvbi.unpar_str(buf2)

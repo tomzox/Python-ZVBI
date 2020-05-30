@@ -19,6 +19,7 @@
 
 #include "zvbi_pfc_demux.h"
 #include "zvbi_capture_buf.h"
+#include "zvbi_callbacks.h"
 
 // ---------------------------------------------------------------------------
 // Page Function Clear (ETS 300 708 section 4) demultiplexer
@@ -125,7 +126,8 @@ ZvbiPfcDemux_init(ZvbiPfcDemuxObj *self, PyObject *args, PyObject *kwds)
     }
 
     if (PyArg_ParseTupleAndKeywords(args, kwds, "IIO|O", kwlist,
-                                    &pgno, &stream, &callback, &user_data))
+                                    &pgno, &stream, &callback, &user_data) &&
+        ZvbiCallbacks_CheckObj(callback))
     {
         /* note: libzvbi prior to version 0.2.26 had an incorrect type definition
          * for the callback, hence the compiler will warn about a type mismatch */

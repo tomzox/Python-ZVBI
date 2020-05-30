@@ -19,6 +19,7 @@
 
 #include "zvbi_xds_demux.h"
 #include "zvbi_capture_buf.h"
+#include "zvbi_callbacks.h"
 
 // ---------------------------------------------------------------------------
 // Extended Data Service (EIA 608) demultiplexer
@@ -121,7 +122,8 @@ ZvbiXdsDemux_init(ZvbiXdsDemuxObj *self, PyObject *args, PyObject *kwds)
     }
 
     if (PyArg_ParseTupleAndKeywords(args, kwds, "O|O", kwlist,
-                                     &callback, &user_data))
+                                     &callback, &user_data) &&
+        ZvbiCallbacks_CheckObj(callback))
     {
         self->ctx = vbi_xds_demux_new(zvbi_xs_demux_xds_handler, self);
 

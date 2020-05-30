@@ -28,7 +28,7 @@
 // MPEG presentation timestamp has resolution of 90 kHz, while VBI timestamps
 // use seconds-since 1970-Jan-01. As normally timestamps are only used for
 // calculating delta, simply converting timer resolution should suffice.
-#define PTS_TO_TIMESTAMP(PTS) ((PTS) / 90000.0)
+#define PTS_TO_TIMESTAMP(PTS) ((PTS) * (1 / 90000.0))
 
 // Default for the maximum number of sliced lines per frame (in iterator mode)
 #define SLICED_LINE_CNT 64
@@ -186,6 +186,7 @@ ZvbiDvbDemux_init(ZvbiDvbDemuxObj *self, PyObject *args, PyObject *kwds)
     PyObject * callback = NULL;
     PyObject * user_data = NULL;
     unsigned max_sliced_lines = SLICED_LINE_CNT;
+    int RETVAL = -1;
 
     // reset state in case the module is already initialized
     if (self->ctx) {
@@ -214,34 +215,32 @@ ZvbiDvbDemux_init(ZvbiDvbDemuxObj *self, PyObject *args, PyObject *kwds)
         self->ctx = NULL;
     }
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$OOI", kwlist,
-                                     &callback, &user_data, &max_sliced_lines))
+    if (PyArg_ParseTupleAndKeywords(args, kwds, "|$OOI", kwlist,
+                                    &callback, &user_data, &max_sliced_lines) &&
+        ZvbiCallbacks_CheckObj(callback))
     {
-        return -1;
-    }
-
-    if (callback != NULL) {
-        self->ctx = vbi_dvb_pes_demux_new(zvbi_xs_dvb_pes_handler, self);
-    }
-    else {
-        self->ctx = vbi_dvb_pes_demux_new(NULL, NULL);
-    }
-
-    int RETVAL = -1;
-    if (self->ctx != NULL) {
         if (callback != NULL) {
-            self->demux_cb = callback;
-            Py_INCREF(callback);
+            self->ctx = vbi_dvb_pes_demux_new(zvbi_xs_dvb_pes_handler, self);
         }
-        if (user_data != NULL) {
-            self->demux_user_data = user_data;
-            Py_INCREF(user_data);
+        else {
+            self->ctx = vbi_dvb_pes_demux_new(NULL, NULL);
         }
-        self->max_sliced_lines = max_sliced_lines;
-        RETVAL = 0;
-    }
-    else {
-        PyErr_SetString(ZvbiDvbDemuxError, "Initialization failed");
+
+        if (self->ctx != NULL) {
+            if (callback != NULL) {
+                self->demux_cb = callback;
+                Py_INCREF(callback);
+            }
+            if (user_data != NULL) {
+                self->demux_user_data = user_data;
+                Py_INCREF(user_data);
+            }
+            self->max_sliced_lines = max_sliced_lines;
+            RETVAL = 0;
+        }
+        else {
+            PyErr_SetString(ZvbiDvbDemuxError, "Initialization failed");
+        }
     }
     return RETVAL;
 }
@@ -368,7 +367,9 @@ ZvbiDvbDemux_set_log_fn(ZvbiDvbDemuxObj *self, PyObject *args)
     PyObject * user_data = NULL;
     PyObject * RETVAL = NULL;
 
-    if (PyArg_ParseTuple(args, "I|OO", &mask, &callback, &user_data)) {
+    if (PyArg_ParseTuple(args, "I|OO", &mask, &callback, &user_data) &&
+        ZvbiCallbacks_CheckObj(callback))
+    {
         if (self->log_cb != NULL) {
             Py_DECREF(self->log_cb);
             self->log_cb = NULL;
@@ -378,7 +379,7 @@ ZvbiDvbDemux_set_log_fn(ZvbiDvbDemuxObj *self, PyObject *args)
             self->log_user_data = NULL;
         }
 
-        if (callback != NULL) {
+        if ((mask != 0) && (callback != NULL)) {
             if (callback != NULL) {
                 self->log_cb = callback;
                 Py_INCREF(callback);
@@ -390,7 +391,7 @@ ZvbiDvbDemux_set_log_fn(ZvbiDvbDemuxObj *self, PyObject *args)
             vbi_dvb_demux_set_log_fn(self->ctx, mask, zvbi_xs_dvb_log_handler, self);
         }
         else {
-            vbi_dvb_demux_set_log_fn(self->ctx, mask, NULL, NULL);
+            vbi_dvb_demux_set_log_fn(self->ctx, 0, NULL, NULL);
         }
         RETVAL = Py_None;
         Py_INCREF(Py_None);

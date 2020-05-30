@@ -18,14 +18,14 @@
 #
 
 # Description:
-
-#  Example for the use of class Zvbi.DvbDemux. This script excercises the
-#  DVB de-multiplexer functions: The script first opens the DVB device,
-#  the continuously captures VBI data, encodes it in a DVB packet stream
-#  and wites the result to STDOUT. The output stream can be decoded
-#  equivalently to that of capture.py, which is:
 #
-#    ./dvb-demux.py --pid NNN --sliced | ./decode.py --ttx
+#  Example for the use of class Zvbi.DvbMux. This script excercises the DVB
+#  multiplexer functions: The script first opens a capture device (normally
+#  this will be an analog device), then continuously captures VBI data, encodes
+#  it in a DVB packet stream and wites the result to STDOUT. The output stream
+#  can be decoded equivalently to that of capture.py, which is:
+#
+#    ./dvb-mux.py | ./decode.py --pes --all
 
 import sys
 import argparse
@@ -45,6 +45,9 @@ def main_func():
     global outfile
     outfile = open(sys.stdout.fileno(), "wb")
 
+    if opt.verbose:
+        Zvbi.set_log_on_stderr(-1)
+
     opt_services = (Zvbi.VBI_SLICED_TELETEXT_B |
                     Zvbi.VBI_SLICED_VPS |
                     Zvbi.VBI_SLICED_CAPTION_625 |
@@ -59,8 +62,6 @@ def main_func():
     else:
         cap = Zvbi.Capture.Dvb(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
 
-    #Zvbi.set_log_on_stderr(-1)
-
     if not opt.use_static:
         # create DVB multiplexer
         if not opt.raw:
@@ -68,6 +69,7 @@ def main_func():
                 mux = Zvbi.DvbMux(pes=True, callback=feed_cb)
             else:
                 mux = Zvbi.DvbMux(pes=True)
+            mux.set_pes_packet_size(0, 8*184)
         else:
             if opt.use_feed:
                 mux = Zvbi.DvbMux(pes=True, callback=feed_cb, raw_par=cap.parameters())
@@ -78,19 +80,26 @@ def main_func():
         # read a sliced VBI frame
         try:
             if not opt.raw:
-                sliced_buf = cap.pull_sliced(1000)
+                if opt.use_read:
+                    sliced_buf = cap.read_sliced(1000)
+                else:
+                    sliced_buf = cap.pull_sliced(1000)
             else:
-                raw_buf, sliced_buf = cap.pull(1000)
+                if opt.use_read:
+                    raw_buf, sliced_buf = cap.read(1000)
+                else:
+                    raw_buf, sliced_buf = cap.pull(1000)
                 if raw_buf is None:
                     print("Capture device does not support raw capture", file=sys.stderr)
                     sys.exit(1)
 
             try:
                 if not opt.use_static:
+                    pts = int(sliced_buf.timestamp * 90000.0)
                     if not opt.raw:
-                        mux.feed(opt_services, sliced_buf=sliced_buf, pts=sliced_buf.timestamp*90000.0)
+                        mux.feed(opt_services, sliced_buf=sliced_buf, pts=pts)
                     else:
-                        mux.feed(opt_services, sliced_buf=sliced_buf, raw_buf=raw_buf, pts=sliced_buf.timestamp*90000.0)
+                        mux.feed(opt_services, sliced_buf=sliced_buf, raw_buf=raw_buf, pts=pts)
 
                     if not opt.use_feed:
                         for pkg in mux:
@@ -122,6 +131,7 @@ def ParseCmdOptions():
     parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0", help="Path to video capture device")
     parser.add_argument("--pid", type=int, default=0, help="VBI channel PID for DVB")
     parser.add_argument("--v4l2", action='store_true', default=False, help="Using analog driver interface")
+    parser.add_argument("--use-read", action='store_true', default=False, help="Use \"read\" capture method instead of \"pull\"")
     parser.add_argument("--use-feed", action='store_true', default=False, help="Use feed/callback API of Zvbi.DvbMux")
     parser.add_argument("--use-static", action='store_true', default=False, help="Use static packet API of Zvbi.DvbMux")
     parser.add_argument("--raw", action='store_true', default=False, help="Include raw data in output")
@@ -129,7 +139,7 @@ def ParseCmdOptions():
     opt = parser.parse_args()
 
     if opt.v4l2 and (opt.pid != 0):
-        print("Options --v4l2 and --pid are multually exclusive", file=sys.stderr)
+        print("Options --v4l2 and --pid are mutually exclusive", file=sys.stderr)
         sys.exit(1)
     if not opt.v4l2 and (opt.pid == 0) and ("dvb" in opt.device):
         print("WARNING: DVB devices require --pid parameter", file=sys.stderr)

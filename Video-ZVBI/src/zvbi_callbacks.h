@@ -48,4 +48,6 @@ void ZvbiCallbacks_free_by_idx( ZvbiCallacksEntry_t * p_list, unsigned idx );
 unsigned ZvbiCallbacks_free_by_ptr( ZvbiCallacksEntry_t * p_list, void * p_obj, PyObject * p_cb, PyObject * p_data, vbi_bool cmp_data );
 void ZvbiCallbacks_free_by_obj( ZvbiCallacksEntry_t * p_list, void * p_obj );
 
+vbi_bool ZvbiCallbacks_CheckObj( PyObject * cb_obj );
+
 #endif  /* _PY_ZVBI_CALLBACKS_H */

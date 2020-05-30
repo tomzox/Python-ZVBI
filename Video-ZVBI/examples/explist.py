@@ -25,8 +25,9 @@
 #
 #   Example for the use of export option management in class Zvbi.Export.
 #   Test of page export options and menu interfaces. The script lists all
-#   available export modules (i.e. formats) and options. (This is a direct
-#   translation of test/explist.c in the libzvbi package.)
+#   available export modules (i.e. formats) and options.
+#
+#   (This is a direct translation of test/explist.c in the libzvbi package.)
 
 import sys
 import re

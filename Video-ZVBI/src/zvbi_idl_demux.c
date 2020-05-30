@@ -19,6 +19,7 @@
 
 #include "zvbi_idl_demux.h"
 #include "zvbi_capture_buf.h"
+#include "zvbi_callbacks.h"
 
 // ---------------------------------------------------------------------------
 // Independent Data Line format A (EN 300 708 section 6.5) demultiplexer
@@ -123,7 +124,8 @@ ZvbiIdlDemux_init(ZvbiIdlDemuxObj *self, PyObject *args, PyObject *kwds)
     }
 
     if (PyArg_ParseTupleAndKeywords(args, kwds, "IIO|O", kwlist,
-                                    &channel, &address, &callback, &user_data))
+                                    &channel, &address, &callback, &user_data) &&
+        ZvbiCallbacks_CheckObj(callback))
     {
         self->ctx = vbi_idl_a_demux_new(channel, address, zvbi_xs_demux_idl_handler, self);
 

@@ -122,6 +122,7 @@ ZvbiDvbMux_init(ZvbiDvbMuxObj *self, PyObject *args, PyObject *kwds)
     PyObject * callback = NULL;
     PyObject * user_data = NULL;
     PyObject * raw_par = NULL;
+    int RETVAL = -1;
 
     // reset state in case the module is already initialized
     if (self->ctx) {
@@ -142,53 +143,52 @@ ZvbiDvbMux_init(ZvbiDvbMuxObj *self, PyObject *args, PyObject *kwds)
         self->ctx = NULL;
     }
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|$pIOOO!", kwlist,
-                                     &pes, &ts_pid, &callback, &user_data,
-                                     &ZvbiRawParamsTypeDef, &raw_par))
+    if (PyArg_ParseTupleAndKeywords(args, kwds, "|$pIOOO!", kwlist,
+                                    &pes, &ts_pid, &callback, &user_data,
+                                    &ZvbiRawParamsTypeDef, &raw_par) &&
+        ZvbiCallbacks_CheckObj(callback))
     {
-        return -1;
-    }
+        if (((pes == FALSE) ^ (ts_pid == 0)) != 0) {  // error if both or neither are present
+            if (pes) {
+                if (callback != NULL) {
+                    self->ctx = vbi_dvb_pes_mux_new(zvbi_xs_dvb_mux_handler, self);
+                }
+                else {
+                    self->ctx = vbi_dvb_pes_mux_new(NULL, NULL);
+                }
+            }
+            else {  // ts
+                if (callback != NULL) {
+                    self->ctx = vbi_dvb_ts_mux_new(ts_pid, zvbi_xs_dvb_mux_handler, self);
+                }
+                else {
+                    self->ctx = vbi_dvb_ts_mux_new(ts_pid, NULL, NULL);
+                }
+            }
 
-    if (((pes == FALSE) ^ (ts_pid == 0)) == 0) {  // error if both or neither are present
-        PyErr_SetString(PyExc_ValueError, "Exactly one of parameters pes or ts_pid have to be specified");
-        return -1;
-    }
-
-    if (pes) {
-        if (callback != NULL) {
-            self->ctx = vbi_dvb_pes_mux_new(zvbi_xs_dvb_mux_handler, self);
+            if (self->ctx != NULL) {
+                if (callback != NULL) {
+                    self->mux_cb = callback;
+                    Py_INCREF(callback);
+                }
+                if (user_data != NULL) {
+                    self->mux_user_data = user_data;
+                    Py_INCREF(user_data);
+                }
+                if (raw_par != NULL) {
+                    self->raw_params = raw_par;
+                    Py_INCREF(raw_par);
+                }
+                RETVAL = 0;
+            }
+            else {
+                PyErr_SetString(ZvbiDvbMuxError, "Initialization failed");
+            }
         }
         else {
-            self->ctx = vbi_dvb_pes_mux_new(NULL, NULL);
+            PyErr_SetString(PyExc_ValueError, "Exactly one of parameters pes or ts_pid have to be specified");
         }
-    }
-    else {  // ts
-        if (callback != NULL) {
-            self->ctx = vbi_dvb_ts_mux_new(ts_pid, zvbi_xs_dvb_mux_handler, self);
-        }
-        else {
-            self->ctx = vbi_dvb_ts_mux_new(ts_pid, NULL, NULL);
-        }
-    }
 
-    int RETVAL = -1;
-    if (self->ctx != NULL) {
-        if (callback != NULL) {
-            self->mux_cb = callback;
-            Py_INCREF(callback);
-        }
-        if (user_data != NULL) {
-            self->mux_user_data = user_data;
-            Py_INCREF(user_data);
-        }
-        if (raw_par != NULL) {
-            self->raw_params = raw_par;
-            Py_INCREF(raw_par);
-        }
-        RETVAL = 0;
-    }
-    else {
-        PyErr_SetString(ZvbiDvbMuxError, "Initialization failed");
     }
     return RETVAL;
 }
@@ -220,11 +220,11 @@ ZvbiDvbMux_feed(ZvbiDvbMuxObj *self, PyObject *args, PyObject *kwds)
                             VBI_SLICED_WSS_625;
     PyObject * sliced_obj = NULL;
     PyObject * raw_obj = NULL;
-    int64_t pts = 0LL;
+    long long pts = 0LL;
     PyObject * RETVAL = NULL;
 
     if ((self->mux_cb != NULL) || (self->sliced_buf_obj == NULL)) {
-        if (PyArg_ParseTupleAndKeywords(args, kwds, "|I$O!O!d", kwlist,
+        if (PyArg_ParseTupleAndKeywords(args, kwds, "|I$O!O!L", kwlist,
                                         &service_mask,
                                         &ZvbiCaptureSlicedBufTypeDef, &sliced_obj,
                                         &ZvbiCaptureRawBufTypeDef, &raw_obj,
@@ -263,7 +263,7 @@ ZvbiDvbMux_feed(ZvbiDvbMuxObj *self, PyObject *args, PyObject *kwds)
                                              service_mask,
                                              (p_raw_buf ? p_raw_buf->data : NULL),
                                              (p_raw_buf ? p_raw_par : NULL),
-                                             pts))
+                                             (int64_t)pts))
                         {
                             RETVAL = Py_None;
                             Py_INCREF(Py_None);

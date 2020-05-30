@@ -27,7 +27,7 @@
 #   Example for the use of class Zvbi.ServiceDec, type Zvbi.VBI_EVENT_CAPTION.
 #   When called without an input stream, the application opens a GUI displaying
 #   a demo messages sequente (character sets etc.) for debugging the decoder.
-#   For displaying live CC streams you can use the following:
+#   For displaying live CC streams use the following:
 #
 #      ./capture.py --sliced | ./caption.py
 #
@@ -38,7 +38,6 @@
 #   albeit based on TkInter here.)
 
 import sys
-import argparse
 import struct
 import tkinter.font as tkf
 from tkinter import *

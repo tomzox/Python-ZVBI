@@ -25,15 +25,18 @@
 #
 #   Example for the use of export actions in class Zvbi.Export. The script
 #   captures from a device until the page specified on the command line is
-#   found and then exports the page in a requested format. Examples:
+#   found and then exports the page content in a requested format.
+#   Alternatively, the script can be used to continuously export a single
+#   or all received pages. Examples:
 #
-#     ./export.py text 100
+#     ./export.py text 100       # teletext page 100 as text
+#     ./export.py text all       # continuously all teletext pages
+#     ./export.py --loop text 1  # continuously closed caption
 #     ./export.py "png;reveal=1" 100 > page_100.png
 #
 #   Use ./explist.py for listing supported export formats (aka "modules")
 #   and possible options. Note options are appended to the module name,
-#   separated by semicolon as shown in the second example. (This is a
-#   direct translation of test/export.c in the libzvbi package.)
+#   separated by semicolon as shown in the second example.
 #
 #   (This is a direct translation of test/export.c in libzvbi.)
 
@@ -50,24 +53,24 @@ quit = False
 cr = '\r' if sys.stderr.isatty() else "\n"
 
 
-def ev_handler(pg_type, ev, user_data=None):
+def ttx_handler(pg_type, ev, user_data=None):
     global quit
 
     print("%cPage %03x.%02x " % (cr, ev.pgno, ev.subno & 0xFF), end='', file=sys.stderr)
 
-    if not opt.page == -1 and not ev.pgno == opt.page:
+    if ev.pgno != opt.page and opt.page != -1:
         return
 
     if sys.stderr.isatty():
         print("", file=sys.stderr)
-    print("Saving page %03X..." % opt.page, file=sys.stderr)
+    print("Saving page %03X..." % ev.pgno, end=('' if opt.to_file else '\n'), file=sys.stderr)
 
     # Fetching & exporting here is a bad idea,
     # but this is only a test.
     with vtdec.fetch_vt_page(ev.pgno, ev.subno) as page:
         try:
-            if opt.page == -1:
-                name = ("test-%03x-%02x.%s" % (ev.pgno, ev.subno, extension))
+            if opt.to_file:
+                name = ("ttx-%03x-%02x.%s" % (ev.pgno, ev.subno, extension))
                 ex.to_file(page, name)
             else:
                 sys.stdout.flush()
@@ -78,13 +81,40 @@ def ev_handler(pg_type, ev, user_data=None):
             print("export failed:", e, file=sys.stderr)
             sys.exit(-1)
 
+        # for test purpose only
         str = ex.to_memory(page)
         #print(str)
         str = None
 
-        if not opt.page == -1:
+        if not opt.loop and opt.page != -1:
             print("done", file=sys.stderr)
-            quit = 1
+            quit = True
+
+
+def cc_handler(pg_type, ev, user_data=None):
+    global quit
+
+    print("%cCC page %d " % (cr, ev.pgno), end='', file=sys.stderr)
+    if not ev.pgno == opt.page:
+        return
+
+    with vtdec.fetch_cc_page(ev.pgno) as page:
+        try:
+            if opt.to_file:
+                name = ("cc-%d.%s" % (ev.pgno, extension))
+                ex.to_file(page, name)
+            else:
+                sys.stdout.flush()
+                fd = sys.stdout.fileno()
+                ex.to_stdio(page, fd)
+
+        except Zvbi.ExportError as e:
+            print("export failed:", e, file=sys.stderr)
+            sys.exit(-1)
+
+    if not opt.loop and opt.page != -1:
+        print("done", file=sys.stderr)
+        quit = True
 
 
 def pes_mainloop():
@@ -106,10 +136,11 @@ def pes_mainloop():
 
 def dev_mainloop():
     global cap
-    global vtdec
 
     if opt.v4l2 or (opt.pid == 0 and not "dvb" in opt.device):
-        opt_services = Zvbi.VBI_SLICED_TELETEXT_B
+        opt_services = (Zvbi.VBI_SLICED_TELETEXT_B |
+                        Zvbi.VBI_SLICED_CAPTION_525 |
+                        Zvbi.VBI_SLICED_CAPTION_625);
         opt_buf_count = 5
         opt_strict = 0
 
@@ -118,9 +149,6 @@ def dev_mainloop():
                                   trace=opt.verbose)
     else:
         cap = Zvbi.Capture.Dvb(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
-
-    vtdec = Zvbi.ServiceDec()
-    vtdec.event_handler_register(Zvbi.VBI_EVENT_TTX_PAGE, ev_handler)
 
     while not quit:
         try:
@@ -138,6 +166,7 @@ def dev_mainloop():
 def main_func():
     global extension
     global ex
+    global vtdec
 
     try:
         ex = Zvbi.Export(opt.module)
@@ -150,6 +179,10 @@ def main_func():
     re.sub(r',.*', '', extension)
     xi = None
 
+    vtdec = Zvbi.ServiceDec()
+    vtdec.event_handler_register(Zvbi.VBI_EVENT_TTX_PAGE, ttx_handler)
+    vtdec.event_handler_register(Zvbi.VBI_EVENT_CAPTION, cc_handler)
+
     if opt.pes:
         pes_mainloop()
     else:
@@ -157,9 +190,12 @@ def main_func():
 
 
 def ttx_pgno(val_str):
-    val = int(val_str, 16)
-    if (val < 0x100) or (val > 0x8FF):
-        raise ValueError("Teletext page not in range 100-8FF")
+    if val_str == "all":
+        val = -1
+    else:
+        val = int(val_str, 16)
+        if not ((val >= 0x100 and val <= 0x8FF) or (val >= 1 and val <= 8)):
+            raise ValueError("Teletext page not in range 100-8FF")
     return val
 
 
@@ -168,8 +204,11 @@ def ParseCmdOptions():
 
     if len(sys.argv) <= 1:
         print("Usage: %s \"module[;option=value]\" pgno >file" % sys.argv[0],
-              "module eg. \"text\" or \"ppm\", pgno eg. 100 (hex) or \"all\"",
-              "Run explist.py for a list of modules and options", sep='\n', file=sys.stderr)
+              "Where: module is eg. \"text\" or \"ppm\"",
+              "       pgno is eg. 100 (hex) or \"all\"",
+              "Run explist.py for a full list of modules and options",
+              "Use --help to get list of command line options",
+              sep='\n', file=sys.stderr)
         sys.exit(1)
 
     parser = argparse.ArgumentParser(description='Search teletext for an entered string')
@@ -177,6 +216,8 @@ def ParseCmdOptions():
     parser.add_argument("--pid", type=int, default=0, help="Teletext channel PID for DVB")
     parser.add_argument("--v4l2", action='store_true', default=False, help="Using analog driver interface")
     parser.add_argument("--pes", action='store_true', default=False, help="Read DVB PES input stream from STDIN")
+    parser.add_argument("--loop", action='store_true', default=False, help="Do not exit after exporting; repeat for every reception")
+    parser.add_argument("--to-file", action='store_true', default=False, help="Store to file named ttx-PGNO-SUBPG.dat or CC-PGNO.dat")
     parser.add_argument("--verbose", action='store_true', default=False, help="Enable trace output in the library")
     parser.add_argument("module", type=str, action='store', help="Export format, optionally followed by option assignments: FORMAT;OPTION=VALUE")
     parser.add_argument("page", type=ttx_pgno, action='store', help="Page number to export")
@@ -184,13 +225,13 @@ def ParseCmdOptions():
 
     if not opt.pes:
         if opt.v4l2 and (opt.pid != 0):
-            print("Options --v4l2 and --pid are multually exclusive", file=sys.stderr)
+            print("Options --v4l2 and --pid are mutually exclusive", file=sys.stderr)
             sys.exit(1)
         if not opt.v4l2 and (opt.pid == 0) and ("dvb" in opt.device):
             print("WARNING: DVB devices require --pid parameter", file=sys.stderr)
     else:
         if opt.v4l2 or (opt.pid != 0):
-            print("Options -pes, --v4l2 and --pid are multually exclusive", file=sys.stderr)
+            print("Options -pes, --v4l2 and --pid are mutually exclusive", file=sys.stderr)
             sys.exit(1)
         if sys.stdin.isatty():
             print("No PES data on stdin", file=sys.stderr)

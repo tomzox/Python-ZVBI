@@ -122,7 +122,7 @@ ZvbiServiceDec_decode_bytes(ZvbiServiceDecObj *self, PyObject *args)
     unsigned n_lines;
     double timestamp;
 
-    if (PyArg_ParseTuple(args, "y*If", &in_buf, &n_lines, &timestamp)) {
+    if (PyArg_ParseTuple(args, "y*Id", &in_buf, &n_lines, &timestamp)) {
         if (n_lines <= in_buf.len / sizeof(vbi_sliced)) {
             vbi_decode(self->ctx, (vbi_sliced*)in_buf.buf, n_lines, timestamp);
             Py_INCREF(Py_None);
@@ -363,7 +363,9 @@ ZvbiServiceDec_event_handler_register(ZvbiServiceDecObj *self, PyObject *args)
     PyObject * user_data_obj = NULL;
     PyObject * RETVAL = NULL;
 
-    if (PyArg_ParseTuple(args, "iO|O", &event_mask, &handler_obj, &user_data_obj)) {
+    if (PyArg_ParseTuple(args, "iO|O", &event_mask, &handler_obj, &user_data_obj) &&
+        ZvbiCallbacks_CheckObj(handler_obj))
+    {
         ZvbiCallbacks_free_by_ptr(ZvbiCallbacks.event, self, handler_obj, user_data_obj, TRUE);
         unsigned cb_idx = ZvbiCallbacks_alloc(ZvbiCallbacks.event, handler_obj, user_data_obj, self);
         if (cb_idx < ZVBI_MAX_CB_COUNT) {
@@ -380,7 +382,7 @@ ZvbiServiceDec_event_handler_register(ZvbiServiceDecObj *self, PyObject *args)
             }
         }
         else {
-            PyErr_SetString(ZvbiServiceDecError, "Overflow of callback table");
+            PyErr_SetString(ZvbiServiceDecError, "Max. Zvbi.ServiceDec callback count exceeded");
         }
     }
     return RETVAL;

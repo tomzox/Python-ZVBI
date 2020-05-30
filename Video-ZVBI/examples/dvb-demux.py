@@ -19,17 +19,21 @@
 
 # Description:
 #
-#   Very simple test of the DVB PES de-multiplexer:
-#   - reading stream from a DVB demux device
-#   - calling de-multiplexer for each chunk of data
-#   - forward sliced data
+#   Example for the use of class Zvbi.DvbDemux.  This script excercises
+#   the DVB de-multiplexer functions: The script directly opens a DVB
+#   capture device, and reads the incoming packets. The de-multiplexer is
+#   used to extract VBI packets, which are then forwarded to STDOUT.  The
+#   output stream can be decoded equivalently to that of capture.py, which
+#   is:
+#
+#     ./dvb-demux.py --sliced | ./decode.py --ttx
 #
 #   NOTE: Instead of reading from the device directly (and performing
 #   device ioctl with hard-coded constants, which is prone to breakage)
-#   you should use the Zvbi.Capture class which does that work for you.
-#   Using the DvbDemux class directly only is useful when receiving a
-#   stream from other sources (e.g. via socket from proxy on a remote
-#   host).
+#   you should normally use the Zvbi.Capture class which does that work
+#   for you.  Using the Zvbi.DvbDemux class directly only is useful
+#   when receiving a stream from other sources (e.g. via socket from
+#   proxy on a remote host).
 
 import sys
 import fcntl
@@ -40,7 +44,7 @@ import Zvbi
 #
 # Callback invoked by DvbDemux.feed()
 #
-def sliced_handler(sliced_buf, pts, user_data=None):
+def sliced_handler(sliced_buf):
     if opt.dump_sliced:
         ttx_lines = vps_lines = wss_lines = cc_lines = 0
         for (data, slc_id, line) in sliced_buf:

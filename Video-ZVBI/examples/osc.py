@@ -373,15 +373,20 @@ def main_func():
         vbi_capture_set_log_fp(cap, stderr)
         Zvbi.set_log_on_stderr(0)
 
-    services = ( Zvbi.VBI_SLICED_VBI_525 | Zvbi.VBI_SLICED_VBI_625 |
-                 Zvbi.VBI_SLICED_TELETEXT_B | Zvbi.VBI_SLICED_CAPTION_525 |
-                 Zvbi.VBI_SLICED_CAPTION_625 | Zvbi.VBI_SLICED_VPS |
-                 Zvbi.VBI_SLICED_WSS_625 | Zvbi.VBI_SLICED_WSS_CPR1204 )
+    services = ( Zvbi.VBI_SLICED_VBI_525 |
+                 Zvbi.VBI_SLICED_VBI_625 |
+                 Zvbi.VBI_SLICED_TELETEXT_B |
+                 Zvbi.VBI_SLICED_CAPTION_525 |
+                 Zvbi.VBI_SLICED_CAPTION_625 |
+                 Zvbi.VBI_SLICED_VPS |
+                 Zvbi.VBI_SLICED_WSS_625 |
+                 Zvbi.VBI_SLICED_WSS_CPR1204 )
+
     opt_strict = 0
     opt_buf_count = 5
     opt_scanning = (525 if opt.ntsc else (625 if opt.pal else 0))
 
-    if opt.pid < 0:
+    if opt.v4l2 or (opt.pid == 0 and not "dvb" in opt.device):
         cap = Zvbi.Capture.Analog(opt.device, services=services, scanning=opt_scanning,
                                   buffers=opt_buf_count, strict=opt_strict, trace=opt.verbose)
     else:
@@ -418,13 +423,17 @@ def ParseCmdOptions():
     parser = argparse.ArgumentParser(description="Plot raw captured VBI video lines")
     parser.add_argument("--device", type=str, default="/dev/vbi0", help="Path to video capture device")
     parser.add_argument("--pid", type=int, default=0, help="Teletext channel PID for DVB")
+    parser.add_argument("--v4l2", action='store_true', default=False, help="Using analog driver interface")
     parser.add_argument("--pal", action='store_true', default=False, help="Force PAL video format")
     parser.add_argument("--ntsc", action='store_true', default=False, help="Force NTSC video format")
     parser.add_argument("--ignore-error", action='store_true', default=False, help="Ignore errors silently")
     parser.add_argument("--verbose", action='count', default=0, help="Enable trace in VBI library")
     opt = parser.parse_args()
 
-    if (opt.pid == 0) and ("dvb" in opt.device):
+    if opt.v4l2 and (opt.pid != 0):
+        print("Options --v4l2 and --pid are mutually exclusive", file=sys.stderr)
+        sys.exit(1)
+    if not opt.v4l2 and (opt.pid == 0) and ("dvb" in opt.device):
         print("WARNING: DVB devices require --pid parameter", file=sys.stderr)
 
 

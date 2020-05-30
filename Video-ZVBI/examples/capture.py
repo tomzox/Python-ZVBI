@@ -27,9 +27,9 @@
 #   data from a device and slices it. The result can be dumped for the
 #   various data services in form of hex-string plus roughly decoded text
 #   (where applicable) for inspection of incoming data. Altnernatively,
-#   output can be written to STDOUT for further processing (decoding) by
-#   piping the data into one of the following example scripts. Call with
-#   option --help for a list of options.
+#   output can be written to STDOUT in binary format for further
+#   processing (decoding) by piping the data into one of the following
+#   example scripts. Call with option --help for a list of options.
 #
 #   (This is a translation of test/capture.c in the libzvbi package.)
 
@@ -224,13 +224,13 @@ ServiceWidth = {
         Zvbi.VBI_SLICED_CAPTION_525: (2, 7),
 }
 
-last = 0.0
+last_ts = 0.0
 
 def binary_sliced(sliced_buf):
-    global last
+    global last_ts
 
-    ts = sliced_buf.timestamp if (last > 0.0) else 0.04
-    outfile.write(bytes("%f\n" % sliced_buf.timestamp, 'ascii'))
+    ts = sliced_buf.timestamp - last_ts if (last_ts > 0.0) else 0.04
+    outfile.write(bytes("%f\n" % ts, 'ascii'))
 
     outfile.write(bytes([len(sliced_buf)]))
 
@@ -241,13 +241,13 @@ def binary_sliced(sliced_buf):
                                  line >> 8]))
             data_len = ServiceWidth.get(slc_id)[0]
             outfile.write(data[0 : data_len])
-            last = sliced_buf.timestamp
+            last_ts = sliced_buf.timestamp
 
     outfile.flush()
 
 
-def binary_ts_pes(user_data, packet, packet_size):
-    outfile.write(packet[0 : packet_size])
+def binary_ts_pes(packet, user_data=None):
+    outfile.write(packet)
     outfile.flush()
     return 1
 
@@ -258,23 +258,26 @@ def mainloop(cap):
 
     while True:
         try:
-            if not opt.pull:
+            if opt.read:
                 raw_buf, sliced_buf = cap.read(1000)
             else:
                 raw_buf, sliced_buf = cap.pull(1000)
             err_cnt = 0
         except Zvbi.CaptureError as e:
-            print("Capture error:", e, file=sys.stderr)
-            err_cnt += 1  # ignore occasional singular errors
-            if err_cnt >= 2:
-                break
+            if not opt.ignore_error:
+                print("Capture error:", e, file=sys.stderr)
+                err_cnt += 1  # ignore occasional singular errors
+                if err_cnt >= 2:
+                    break
+                continue
         except Zvbi.CaptureTimeout:
-            print("Capture timeout", file=sys.stderr)
+            if not opt.ignore_error:
+                print("Capture timeout", file=sys.stderr)
             continue
 
         if False:
-            print(".", file=outfile)
-            outfile.flush()
+            print(".", file=sys.stderr)
+            sys.stderr.flush()
 
         if dump:
             decode_sliced(sliced_buf)
@@ -282,10 +285,14 @@ def mainloop(cap):
         if opt.sliced:
             binary_sliced(sliced_buf)
 
-#X#        if opt.pes or opt.ts:
-#X#            # XXX shouldn't use system time
-#X#            pts = timestamp * 90000.0
-#X#            _vbi_dvb_mux_feed (mx, pts, sliced_buf, len(sliced_buf), -1); # service_set: all
+        if opt.pes or opt.ts:
+            # XXX shouldn't use system time
+            pts = int(sliced_buf.timestamp * 90000.0)
+            services = (Zvbi.VBI_SLICED_TELETEXT_B |
+                        Zvbi.VBI_SLICED_VPS |
+                        Zvbi.VBI_SLICED_CAPTION_625 |
+                        Zvbi.VBI_SLICED_WSS_625)
+            mx.feed(services, sliced_buf=sliced_buf, pts=pts)
 
 
 #static const char short_options[] = "123cd:elnpr:stvPT"
@@ -295,18 +302,17 @@ def ParseCmdOptions():
     parser = argparse.ArgumentParser(description='ZVBI capturing example')
     parser.add_argument("--device", type=str, default="/dev/dvb/adapter0/demux0", help="Path to video capture device")  # dev_name,
     parser.add_argument("--pid", type=int, default=0, help="Teletext channel PID for DVB")
-    parser.add_argument("--ignore-error", action='store_true', default=False, help="Suppress warnings about device errors")
+    parser.add_argument("--ignore-error", action='store_true', default=False, help="Silently ignore device errors and timeout")
     parser.add_argument("--dump-ttx", action='store_true', default=False, help="Capture and dump teletext packets")
     parser.add_argument("--dump-xds", action='store_true', default=False, help="Capture and dump CC XDS packets")
     parser.add_argument("--dump-cc", action='store_true', default=False, help="Capture and dump CC packets")
     parser.add_argument("--dump-wss", action='store_true', default=False, help="Capture and dump WSS")
     parser.add_argument("--dump-vps", action='store_true', default=False, help="Capture and dump VPS data")
     parser.add_argument("--dump-sliced", action='store_true', default=False, help="Capture and all VBI services")
-    #parser.add_argument("--pes", action='store_true', default=False)   # bin_pes,
-    #parser.add_argument("--ts", action='store_true', default=False)   # bin_ts,
+    parser.add_argument("--pes", action='store_true', default=False, help="Write output as PES DVB stream")   # bin_pes,
+    parser.add_argument("--ts", action='store_true', default=False, help="Write output as TS DVB stream")   # bin_ts,
     parser.add_argument("--sliced", action='store_true', default=False, help="Write binary output, for piping into decode.py")   # bin_sliced,
-    parser.add_argument("--read", action='store_true', default=True, help="Use read methods of Zvbi.Capture class")   # do_read,
-    parser.add_argument("--pull", action='store_true', default=False, help="Use pull methods of Zvbi.Capture class")   # do_read,
+    parser.add_argument("--read", action='store_true', default=False, help="Use \"read\" capture method instead of \"pull\"")   # do_read,
     parser.add_argument("--strict", type=int, default=0, help="Use strict mode 0,1,2 for adding VBI services")
     #parser.add_argument("--desync", action='store_true', default=False)
     #parser.add_argument("--sim", action='store_true', default=False)   # do_sim,
@@ -320,7 +326,7 @@ def ParseCmdOptions():
     opt = parser.parse_args()
 
     if opt.v4l2 and (opt.pid != 0):
-        print("Options --v4l2 and --pid are multually exclusive", file=sys.stderr)
+        print("Options --v4l2 and --pid are mutually exclusive", file=sys.stderr)
         sys.exit(1)
     if not opt.v4l2 and (opt.pid == 0) and ("dvb" in opt.device):
         print("WARNING: DVB devices require --pid parameter", file=sys.stderr)
@@ -334,10 +340,19 @@ def main_func():
     else:
         scanning = 0
 
+    dump = (opt.dump_wss or opt.dump_vps or opt.dump_sliced)
+
     if opt.dump_ttx or opt.dump_cc or opt.dump_xds:
         print("Teletext, CC and XDS decoding are no longer supported by this tool.\n" +
               "Run  ./capture --sliced | ./decode --ttx --cc --xds  instead.\n", file=sys.stderr)
         exit(-1)
+
+    if opt.sliced:
+        if opt.pes or opt.ts or dump:
+            print("WARNING: combining --sliced with --pes, --ts or --dump* will garble output", file=sys.stderr)
+    elif opt.pes or opt.ts:
+        if opt.sliced or dump:
+            print("WARNING: combining --pes/ts with --sliced or --dump* will garble output", file=sys.stderr)
 
     services = (Zvbi.VBI_SLICED_VBI_525 |
                 Zvbi.VBI_SLICED_VBI_625 |
@@ -354,8 +369,7 @@ def main_func():
         pass
     elif opt.v4l2 or (opt.pid == 0 and not "dvb" in opt.device):
         cap = Zvbi.Capture.Analog(opt.device, services=services, scanning=scanning,
-                                  dvb_pid=opt.pid, strict=opt.strict, trace=opt.verbose,
-                                  buffers=5)
+                                  strict=opt.strict, trace=opt.verbose, buffers=5)
         par = cap.parameters()
     else:
         cap = Zvbi.Capture.Dvb(opt.device, dvb_pid=opt.pid, trace=opt.verbose)
@@ -372,20 +386,13 @@ def main_func():
                     % par.sampling_format, file=sys.stderr)
             exit(-1)
 
-#X#    if opt.pes:
-#X#        mx = _vbi_dvb_mux_pes_new (0x10, # data_identifier
-#X#                                   8 * 184, # packet_size
-#X#                                   0, #TODO Zvbi.VBI_VIDEOSTD_SET_625_50,
-#X#                                   \&binary_ts_pes)
-#X#        die unless defined mx
-#X#
-#X#    elif opt.ts:
-#X#        mx = _vbi_dvb_mux_ts_new (999, # pid
-#X#                                  0x10, # data_identifier
-#X#                                  8 * 184, # packet_size
-#X#                                  0, #TODO Zvbi.VBI_VIDEOSTD_SET_625_50,
-#X#                                  \&binary_ts_pes)
-#X#        die unless defined mx
+    global mx
+    if opt.pes:
+        mx = Zvbi.DvbMux(pes=True, callback=binary_ts_pes)
+        mx.set_pes_packet_size (0, 8* 184)
+    elif opt.ts:
+        mx = Zvbi.DvbMux(ts_pid=999, callback=binary_ts_pes)
+        mx.set_pes_packet_size (0, 8* 184)
 
     global outfile
     outfile = open(sys.stdout.fileno(), "wb")

@@ -1,0 +1,9 @@
+- FIXMEs & TODOs in src/ & examples/
+- add Doc-str for member functions in all classes
+- add Zvbi.VBI_* constants description to doc/ZVBI.rst
+- add repr() method for all types
+- examples/browse-ttx: make ">>" work for TOP pages
+- reconsider zvbi_event_types.c: use "tp_members" to query existing C struct
+  instead of instantiating named tuple objects; problem: safety against
+  access after limited life-time of C struct
+- introduce type for result of get_page_text_properties()

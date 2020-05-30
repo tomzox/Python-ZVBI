@@ -164,7 +164,8 @@ ZvbiSearch_init(ZvbiSearchObj *self, PyObject *args, PyObject *kwds)
     if (PyArg_ParseTupleAndKeywords(args, kwds, "O!U|ii$ppIOO", kwlist,
                                     &ZvbiServiceDecTypeDef, &dec_obj, &pattern_obj,
                                     &pgno, &subno, &casefold, &regexp, &direction,
-                                    &progress, &user_data))
+                                    &progress, &user_data) &&
+        ZvbiCallbacks_CheckObj(progress))
     {
         vbi_decoder * dec = ZvbiServiceDec_GetBuf(dec_obj);
         if (dec != NULL) {

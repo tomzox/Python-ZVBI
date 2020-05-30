@@ -20,7 +20,7 @@
 #  You should have received a copy of the GNU General Public License
 #  along with this program; if not, write to the Free Software
 #  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-#/
+#
 
 # Description:
 #
@@ -294,7 +294,7 @@ def caption(inbuf, line):
             # in UTF-8, but not necessarily in ASCII.
             text = struct.pack("2B", c1, c2)
 
-            # Error ignored.
+            # Error ignored (i.e. replace invalid characters with '?')
             utf = Zvbi.iconv_caption(text, ord('?'))
             # suppress warnings about wide characters
             #utf = encode("ISO-8859-1", utf, Encode::FB_DEFAULT)
@@ -834,7 +834,6 @@ def main_func():
         #dvb = Zvbi.DvbDemux(dvb_feed_cb)
         dvb = Zvbi.DvbDemux()
         if opt.verbose:
-            dvb.set_log_fn
             dvb.set_log_fn(Zvbi.VBI_LOG_DEBUG, lambda l,c,m: print("DEMUX LOG", l, c, m, file=sys.stderr))
         pes_mainloop()
     else:
